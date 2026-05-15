@@ -4,11 +4,15 @@
   <div class="mb-6">
     <div class="flex items-center justify-between">
       <div class="flex items-center space-x-3">
-        <h1 class="text-2xl font-bold text-gray-900">🔍 STAC Item Search</h1>
+        <h1 class="text-2xl font-bold text-gray-900">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6 mr-2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg> STAC Item Search
+        </h1>
       </div>
       <div class="flex space-x-2">
         <a href="/stac/web/browse" 
-           class="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors">
+           class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
           ← Back to Browser
         </a>
       </div>
@@ -16,9 +20,9 @@
   </div>
 
   <!-- Search Form -->
-  <div class="bg-white shadow-sm border border-gray-200 rounded-lg p-6 mb-6">
-    <form action="/stac/web/search" method="get" class="space-y-6">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  <div class="bg-gray-50 shadow-sm shadow-black/20 border border-gray-100 rounded-lg p-6 mb-6">
+    <form action="/stac/web/search" method="get" class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 gap-6">
         <!-- Collections -->
         <div>
           <label for="collections" class="block text-sm font-medium text-gray-700 mb-2">
@@ -64,7 +68,7 @@
       </div>
 
       <!-- Date Range -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="grid grid-cols-1">
         <div>
           <label for="datetime_start" class="block text-sm font-medium text-gray-700 mb-2">
             Start Date
@@ -75,7 +79,7 @@
                  value={@search_params["datetime_start"] || ""}
                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
         </div>
-        <div>
+        <div class="lg:mt-[-80px]">
           <label for="datetime_end" class="block text-sm font-medium text-gray-700 mb-2">
             End Date
           </label>
@@ -88,52 +92,64 @@
       </div>
 
       <!-- Bounding Box -->
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-2">
-          Bounding Box (West, South, East, North)
-        </label>
-        <div class="grid grid-cols-4 gap-2">
-          <input type="number" 
-                 name="bbox_west" 
-                 value={get_bbox_value(@search_params, 0)}
-                 step="any"
-                 placeholder="West"
-                 class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+      <div class="grid grid-cols-1 gap-6">
+        <div>
+          <label for="bbox_west" class="block text-sm font-medium text-gray-700 mb-2">
+            Bounding Box (West, South, East, North)
+          </label>
+          <%!-- <div class="grid gap-2"> --%>
+            <input type="number" 
+                  id="bbox_west"
+                  name="bbox_west"
+                  value={get_bbox_value(@search_params, 0)}
+                  step="any"
+                  placeholder="West"
+                  class="w-full px-3 py-[9px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+        </div>
+        <div>
           <input type="number" 
                  name="bbox_south" 
                  value={get_bbox_value(@search_params, 1)}
                  step="any"
                  placeholder="South"
-                 class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                 class="w-full px-3 py-[9px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+        </div>
+        <div>
           <input type="number" 
                  name="bbox_east" 
                  value={get_bbox_value(@search_params, 2)}
                  step="any"
                  placeholder="East"
-                 class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                 class="w-full px-3 py-[9px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+        </div>
+        <div class="">
           <input type="number" 
                  name="bbox_north" 
                  value={get_bbox_value(@search_params, 3)}
                  step="any"
                  placeholder="North"
-                 class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+                 class="w-full px-3 py-[9px] border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+          <p class="text-xs text-gray-500 mt-1 pb-[0px] mb-[0px]">Geographic bounding box coordinates</p>
         </div>
-        <p class="text-xs text-gray-500 mt-1">Geographic bounding box coordinates</p>
+        <%!-- </div> --%>
       </div>
 
       <!-- Search Buttons -->
       <div class="flex space-x-3">
         <button type="submit" 
-                class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors">
-          🔍 Search Items
+                class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="h-6 w-6 mr-2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+          Search Items
         </button>
         <button type="button" 
                 onclick="searchAsJson()"
-                class="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors">
+                class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
           📄 Get JSON Results
         </button>
         <a href="/stac/web/search" 
-           class="px-6 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition-colors">
+           class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
           Clear
         </a>
       </div>
@@ -267,8 +283,9 @@
         </div>
       </div>
     <% else %>
-      <div class="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-        <div class="text-blue-600">
+    <%!-- search text here --%>
+      <div class="bg-gray-50 shadow-sm shadow-black/20 border border-gray-100 rounded-lg p-6 mb-6 text-center">
+        <div class="text-secondary">
           <h3 class="text-lg font-medium mb-2">Ready to Search</h3>
           <p>Fill in the search criteria above and click "Search Items" to find STAC items.</p>
         </div>
