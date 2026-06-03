@@ -14,6 +14,12 @@ defmodule StacApiWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :api_with_session do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug :fetch_flash
+  end
+
   pipeline :auth do
     plug StacApiWeb.Plugs.AuthPlug
   end
@@ -89,13 +95,15 @@ defmodule StacApiWeb.Router do
     pipe_through :browser
     get "/", StacBrowserController, :landing
     get "/browse", StacBrowserController, :index
+    post "/auth", StacBrowserController, :authenticate
+    post "/logout", StacBrowserController, :logout
     get "/browse/*path", StacBrowserController, :show
     get "/search", StacBrowserController, :search
   end
 
   # Web API endpoints (for AJAX calls from web interface)
   scope "/stac/web", StacApiWeb do
-    pipe_through :api
+    pipe_through :api_with_session
     get "/search/api", StacBrowserController, :search_api
   end
 
