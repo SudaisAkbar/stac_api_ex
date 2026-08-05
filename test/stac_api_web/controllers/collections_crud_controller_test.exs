@@ -313,6 +313,61 @@ defmodule StacApiWeb.CollectionsCrudControllerTest do
     end
   end
 
+  describe "STAC created/updated" do
+    setup %{conn: conn, api_key: api_key} do
+      conn
+      |> add_auth_header(api_key)
+      |> post(~p"/stac/manage/v1/collections", %{
+        "id" => "timestamped-collection",
+        "title" => "Timestamped",
+        "license" => "CC-BY-4.0"
+      })
+
+      :ok
+    end
+
+    test "POST returns RFC 3339 created/updated at the top level", %{conn: conn, api_key: api_key} do
+      conn =
+        conn
+        |> add_auth_header(api_key)
+        |> post(~p"/stac/manage/v1/collections", %{
+          "id" => "fresh-collection",
+          "title" => "Fresh",
+          "license" => "CC-BY-4.0"
+        })
+
+      assert response = json_response(conn, 201)
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["data"]["created"])
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["data"]["updated"])
+    end
+
+    test "GET exposes created/updated", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/collections/timestamped-collection")
+      assert response = json_response(conn, 200)
+
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["created"])
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["updated"])
+    end
+
+    test "PATCH keeps created stable and reports a fresh updated", %{conn: conn, api_key: api_key} do
+      before = json_response(get(conn, ~p"/stac/manage/v1/collections/timestamped-collection"), 200)
+
+      patched =
+        conn
+        |> add_auth_header(api_key)
+        |> patch(~p"/stac/manage/v1/collections/timestamped-collection", %{
+          "id" => "timestamped-collection",
+          "title" => "Renamed"
+        })
+        |> json_response(200)
+
+      assert patched["data"]["created"] == before["created"]
+      assert {:ok, updated, 0} = DateTime.from_iso8601(patched["data"]["updated"])
+      assert {:ok, created, 0} = DateTime.from_iso8601(patched["data"]["created"])
+      assert DateTime.compare(updated, created) in [:gt, :eq]
+    end
+  end
+
   describe "DELETE /collections/:id - delete collection" do
     test "deletes a collection successfully", %{conn: conn, api_key: api_key} do
       params = %{

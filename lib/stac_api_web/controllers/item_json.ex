@@ -17,6 +17,7 @@ defmodule StacApiWeb.ItemJSON do
   """
 
   alias StacApi.Data.Item
+  alias StacApiWeb.STACDateTime
 
   @doc """
   Render an item as a STAC Item (GeoJSON Feature) object.
@@ -29,10 +30,26 @@ defmodule StacApiWeb.ItemJSON do
       id: item.id,
       geometry: item.geometry,
       bbox: item.bbox,
-      properties: item.properties || %{},
+      properties: stac_properties(item),
       assets: assets,
       collection: item.collection_id,
       links: links
     }
   end
+
+  # STAC Common Metadata puts `created` / `updated` inside an item's properties,
+  # unlike collections and catalogs where they are top level.
+  #
+  # These are the API's record of its own writes, so they win over anything the
+  # client sent under the same keys — a client that trusted its own `updated`
+  # back could not detect that the server had been written to meanwhile, which
+  # is the whole point of exposing them.
+  defp stac_properties(%Item{} = item) do
+    (item.properties || %{})
+    |> put_unless_nil("created", STACDateTime.to_rfc3339(item.inserted_at))
+    |> put_unless_nil("updated", STACDateTime.to_rfc3339(item.updated_at))
+  end
+
+  defp put_unless_nil(map, _key, nil), do: map
+  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
 end

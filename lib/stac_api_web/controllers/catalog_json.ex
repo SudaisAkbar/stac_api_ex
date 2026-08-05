@@ -10,9 +10,13 @@ defmodule StacApiWeb.CatalogJSON do
   """
 
   alias StacApi.Data.Catalog
+  alias StacApiWeb.STACDateTime
 
   @doc """
   Render a catalog as a STAC Catalog object.
+
+  `created` / `updated` are STAC Common Metadata and sit at the top level for
+  catalogs and collections (only items carry them inside `properties`).
   """
   def to_stac(%Catalog{} = catalog, links) do
     %{
@@ -22,6 +26,8 @@ defmodule StacApiWeb.CatalogJSON do
       title: catalog.title,
       description: catalog.description,
       extent: catalog.extent,
+      created: STACDateTime.to_rfc3339(catalog.inserted_at),
+      updated: STACDateTime.to_rfc3339(catalog.updated_at),
       links: links
     }
   end

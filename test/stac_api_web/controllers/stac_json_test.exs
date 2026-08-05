@@ -5,6 +5,8 @@ defmodule StacApiWeb.StacJSONTest do
   alias StacApiWeb.{CatalogJSON, CollectionJSON, ItemJSON}
 
   @links [%{"rel" => "self", "href" => "/stac/api/v1/x", "type" => "application/json"}]
+  @created ~U[2026-04-09 13:52:11Z]
+  @updated ~U[2026-08-05 21:48:19Z]
 
   describe "CatalogJSON.to_stac/2" do
     test "renders the STAC catalog fields" do
@@ -13,7 +15,9 @@ defmodule StacApiWeb.StacJSONTest do
         title: "Cat",
         description: "desc",
         stac_version: "1.1.0",
-        extent: %{"spatial" => %{"bbox" => [[-180, -90, 180, 90]]}}
+        extent: %{"spatial" => %{"bbox" => [[-180, -90, 180, 90]]}},
+        inserted_at: @created,
+        updated_at: @updated
       }
 
       assert CatalogJSON.to_stac(catalog, @links) == %{
@@ -23,8 +27,18 @@ defmodule StacApiWeb.StacJSONTest do
                title: "Cat",
                description: "desc",
                extent: %{"spatial" => %{"bbox" => [[-180, -90, 180, 90]]}},
+               created: "2026-04-09T13:52:11Z",
+               updated: "2026-08-05T21:48:19Z",
                links: @links
              }
+    end
+
+    test "renders created/updated as RFC 3339 at the top level" do
+      catalog = %Catalog{id: "cat", inserted_at: @created, updated_at: @updated}
+      stac = CatalogJSON.to_stac(catalog, [])
+
+      assert stac.created == "2026-04-09T13:52:11Z"
+      assert stac.updated == "2026-08-05T21:48:19Z"
     end
 
     test "defaults stac_version and keeps nil fields" do
@@ -62,6 +76,14 @@ defmodule StacApiWeb.StacJSONTest do
       assert stac.summaries == %{"gsd" => [10]}
       assert stac.stac_extensions == ["ext"]
       assert stac.links == @links
+    end
+
+    test "renders created/updated as RFC 3339 at the top level" do
+      collection = %Collection{id: "coll", inserted_at: @created, updated_at: @updated}
+      stac = CollectionJSON.to_stac(collection, [])
+
+      assert stac.created == "2026-04-09T13:52:11Z"
+      assert stac.updated == "2026-08-05T21:48:19Z"
     end
 
     test "defaults stac_version and stac_extensions" do
@@ -125,6 +147,43 @@ defmodule StacApiWeb.StacJSONTest do
       assert stac.stac_extensions == []
       assert stac.properties == %{}
       assert stac.geometry == nil
+    end
+
+    test "puts created/updated inside properties, not at the top level" do
+      item = %Item{
+        id: "item",
+        properties: %{"datetime" => "2023-06-15T10:00:00Z"},
+        inserted_at: @created,
+        updated_at: @updated
+      }
+
+      stac = ItemJSON.to_stac(item, [], %{})
+
+      assert stac.properties["created"] == "2026-04-09T13:52:11Z"
+      assert stac.properties["updated"] == "2026-08-05T21:48:19Z"
+      assert stac.properties["datetime"] == "2023-06-15T10:00:00Z"
+      refute Map.has_key?(stac, :created)
+      refute Map.has_key?(stac, :updated)
+    end
+
+    test "server timestamps win over client-supplied created/updated" do
+      item = %Item{
+        id: "item",
+        properties: %{"created" => "1999-01-01T00:00:00Z", "updated" => "1999-01-01T00:00:00Z"},
+        inserted_at: @created,
+        updated_at: @updated
+      }
+
+      stac = ItemJSON.to_stac(item, [], %{})
+
+      assert stac.properties["created"] == "2026-04-09T13:52:11Z"
+      assert stac.properties["updated"] == "2026-08-05T21:48:19Z"
+    end
+
+    test "omits created/updated rather than emitting nulls into properties" do
+      stac = ItemJSON.to_stac(%Item{id: "unsaved", properties: %{"a" => 1}}, [], %{})
+
+      assert stac.properties == %{"a" => 1}
     end
   end
 end

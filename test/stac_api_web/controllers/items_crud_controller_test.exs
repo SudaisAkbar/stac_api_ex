@@ -563,4 +563,63 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
       assert json_response(conn, 401)
     end
   end
+
+  describe "STAC created/updated" do
+    setup %{conn: conn} do
+      post(conn, ~p"/stac/manage/v1/items", %{
+        "id" => "timestamped-item",
+        "collection_id" => "test-collection",
+        "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
+        "datetime" => "2024-01-01T12:00:00Z",
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Timestamped"}
+      })
+
+      :ok
+    end
+
+    test "GET nests RFC 3339 created/updated inside properties", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/items/timestamped-item")
+      assert response = json_response(conn, 200)
+
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["properties"]["created"])
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["properties"]["updated"])
+
+      # STAC keeps these in properties for items, unlike collections and catalogs
+      refute Map.has_key?(response, "created")
+      refute Map.has_key?(response, "updated")
+    end
+
+    test "existing properties survive alongside the timestamps", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/items/timestamped-item")
+      response = json_response(conn, 200)
+
+      assert response["properties"]["description"] == "Timestamped"
+      assert response["properties"]["datetime"] == "2024-01-01T12:00:00Z"
+    end
+
+    test "PATCH keeps created stable and reports a fresh updated", %{conn: conn} do
+      before = json_response(get(conn, ~p"/stac/manage/v1/items/timestamped-item"), 200)
+
+      patched =
+        conn
+        |> patch(~p"/stac/manage/v1/items/timestamped-item", %{
+          "id" => "timestamped-item",
+          "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Patched"}
+        })
+        |> json_response(200)
+
+      assert patched["data"]["properties"]["created"] == before["properties"]["created"]
+      assert {:ok, updated, 0} = DateTime.from_iso8601(patched["data"]["properties"]["updated"])
+      assert {:ok, created, 0} = DateTime.from_iso8601(patched["data"]["properties"]["created"])
+      assert DateTime.compare(updated, created) in [:gt, :eq]
+    end
+
+    test "index exposes created/updated per feature", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/items")
+      response = json_response(conn, 200)
+
+      item = Enum.find(response["features"], &(&1["id"] == "timestamped-item"))
+      assert {:ok, _, 0} = DateTime.from_iso8601(item["properties"]["created"])
+    end
+  end
 end

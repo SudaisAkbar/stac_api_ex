@@ -255,4 +255,44 @@ defmodule StacApiWeb.CatalogsCrudControllerTest do
       assert json_response(conn, 404)
     end
   end
+
+  describe "STAC created/updated" do
+    setup %{conn: conn, api_key: api_key} do
+      conn
+      |> add_auth_header(api_key)
+      |> post(~p"/stac/manage/v1/catalogs", %{
+        "id" => "timestamped-catalog",
+        "title" => "Timestamped"
+      })
+
+      :ok
+    end
+
+    test "POST returns RFC 3339 created/updated at the top level", %{conn: conn, api_key: api_key} do
+      conn =
+        conn
+        |> add_auth_header(api_key)
+        |> post(~p"/stac/manage/v1/catalogs", %{"id" => "fresh-catalog", "title" => "Fresh"})
+
+      assert response = json_response(conn, 201)
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["data"]["created"])
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["data"]["updated"])
+    end
+
+    test "GET exposes created/updated", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/catalogs/timestamped-catalog")
+      assert response = json_response(conn, 200)
+
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["created"])
+      assert {:ok, _, 0} = DateTime.from_iso8601(response["updated"])
+    end
+
+    test "index exposes created/updated per catalog", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/catalogs")
+      assert response = json_response(conn, 200)
+
+      catalog = Enum.find(response["catalogs"], &(&1["id"] == "timestamped-catalog"))
+      assert {:ok, _, 0} = DateTime.from_iso8601(catalog["created"])
+    end
+  end
 end

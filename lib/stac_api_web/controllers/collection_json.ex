@@ -10,6 +10,7 @@ defmodule StacApiWeb.CollectionJSON do
   """
 
   alias StacApi.Data.Collection
+  alias StacApiWeb.STACDateTime
 
   @doc """
   Render a collection as a STAC Collection object.
@@ -37,6 +38,8 @@ defmodule StacApiWeb.CollectionJSON do
       providers: collection.providers,
       stac_extensions: collection.stac_extensions || [],
       catalog_id: collection.catalog_id,
+      created: STACDateTime.to_rfc3339(collection.inserted_at),
+      updated: STACDateTime.to_rfc3339(collection.updated_at),
       links: links
     }
 
