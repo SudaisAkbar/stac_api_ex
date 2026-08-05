@@ -1,5 +1,5 @@
 defmodule StacApi.Data.Collection do
-  use Ecto.Schema
+  use StacApi.Schema
   import Ecto.Changeset
   alias StacApi.Data.Item
 

@@ -1,5 +1,5 @@
 defmodule StacApi.Data.Catalog do
-  use Ecto.Schema
+  use StacApi.Schema
   import Ecto.Changeset
 
   @primary_key {:id, :string, autogenerate: false}
@@ -19,7 +19,7 @@ defmodule StacApi.Data.Catalog do
     has_many :child_catalogs, StacApi.Data.Catalog, foreign_key: :parent_catalog_id
     has_many :collections, StacApi.Data.Collection, foreign_key: :catalog_id
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   def changeset(catalog, attrs) do

@@ -87,13 +87,13 @@
             <%= if @current_entity.inserted_at do %>
               <div>
                 <dt class="text-xs font-medium text-gray-400">Record created</dt>
-                <dd class="mt-0.5 text-xs text-gray-500 font-mono"><%= NaiveDateTime.to_string(@current_entity.inserted_at) %> UTC</dd>
+                <dd class="mt-0.5 text-xs text-gray-500 font-mono"><%= Calendar.strftime(@current_entity.inserted_at, "%Y-%m-%d %H:%M:%S") %> UTC</dd>
               </div>
             <% end %>
             <%= if @current_entity.updated_at do %>
               <div>
                 <dt class="text-xs font-medium text-gray-400">Record updated</dt>
-                <dd class="mt-0.5 text-xs text-gray-500 font-mono"><%= NaiveDateTime.to_string(@current_entity.updated_at) %> UTC</dd>
+                <dd class="mt-0.5 text-xs text-gray-500 font-mono"><%= Calendar.strftime(@current_entity.updated_at, "%Y-%m-%d %H:%M:%S") %> UTC</dd>
               </div>
             <% end %>
           </div>

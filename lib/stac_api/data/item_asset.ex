@@ -1,5 +1,5 @@
 defmodule StacApi.Data.ItemAsset do
-  use Ecto.Schema
+  use StacApi.Schema
   import Ecto.Changeset
 
   schema "item_assets" do

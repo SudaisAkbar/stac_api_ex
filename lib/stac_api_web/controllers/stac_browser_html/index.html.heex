@@ -110,10 +110,10 @@
 
       <div class="mt-3 flex space-x-4 text-xs text-secondary border-t border-secondary pt-2">
         <%= if @current_entity.inserted_at do %>
-          <span>Created: <%= NaiveDateTime.to_string(@current_entity.inserted_at) %> UTC</span>
+          <span>Created: <%= Calendar.strftime(@current_entity.inserted_at, "%Y-%m-%d %H:%M:%S") %> UTC</span>
         <% end %>
         <%= if @current_entity.updated_at do %>
-          <span>Updated: <%= NaiveDateTime.to_string(@current_entity.updated_at) %> UTC</span>
+          <span>Updated: <%= Calendar.strftime(@current_entity.updated_at, "%Y-%m-%d %H:%M:%S") %> UTC</span>
         <% end %>
       </div>
 
