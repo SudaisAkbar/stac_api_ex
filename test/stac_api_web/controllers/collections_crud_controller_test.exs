@@ -59,6 +59,7 @@ defmodule StacApiWeb.CollectionsCrudControllerTest do
 
       assert response = json_response(conn, 201)
       assert response["data"]["id"] == "catalog-collection"
+      assert response["data"]["catalog_id"] == "test-catalog"
     end
 
     test "returns 409 when collection ID already exists", %{conn: conn, api_key: api_key} do
@@ -224,6 +225,91 @@ defmodule StacApiWeb.CollectionsCrudControllerTest do
 
       conn = conn |> add_auth_header(api_key) |> patch(~p"/stac/manage/v1/collections/non-existent", params)
       assert json_response(conn, 404)
+    end
+  end
+
+  describe "catalog_id exposure" do
+    setup %{conn: conn, api_key: api_key} do
+      conn
+      |> add_auth_header(api_key)
+      |> post(~p"/stac/manage/v1/collections", %{
+        "id" => "owned-collection",
+        "title" => "Owned",
+        "license" => "CC-BY-4.0",
+        "catalog_id" => "test-catalog"
+      })
+
+      conn
+      |> add_auth_header(api_key)
+      |> post(~p"/stac/manage/v1/collections", %{
+        "id" => "root-collection",
+        "title" => "Root",
+        "license" => "CC-BY-4.0"
+      })
+
+      :ok
+    end
+
+    test "GET /collections/:id echoes the owning catalog", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/collections/owned-collection")
+      assert response = json_response(conn, 200)
+      assert response["catalog_id"] == "test-catalog"
+    end
+
+    test "GET /collections lists catalog_id per collection", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/collections")
+      assert response = json_response(conn, 200)
+
+      owned = Enum.find(response["collections"], &(&1["id"] == "owned-collection"))
+      assert owned["catalog_id"] == "test-catalog"
+    end
+
+    test "PUT /collections/:id echoes the catalog it was moved to", %{conn: conn, api_key: api_key} do
+      conn =
+        conn
+        |> add_auth_header(api_key)
+        |> put(~p"/stac/manage/v1/collections/root-collection", %{
+          "id" => "root-collection",
+          "title" => "Root",
+          "license" => "CC-BY-4.0",
+          "catalog_id" => "test-catalog"
+        })
+
+      assert response = json_response(conn, 200)
+      assert response["data"]["catalog_id"] == "test-catalog"
+    end
+
+    test "PATCH /collections/:id echoes catalog_id even when untouched", %{conn: conn, api_key: api_key} do
+      conn =
+        conn
+        |> add_auth_header(api_key)
+        |> patch(~p"/stac/manage/v1/collections/owned-collection", %{
+          "id" => "owned-collection",
+          "title" => "Renamed"
+        })
+
+      assert response = json_response(conn, 200)
+      assert response["data"]["catalog_id"] == "test-catalog"
+    end
+
+    test "root-level collections report a null catalog_id on write", %{conn: conn, api_key: api_key} do
+      conn =
+        conn
+        |> add_auth_header(api_key)
+        |> patch(~p"/stac/manage/v1/collections/root-collection", %{
+          "id" => "root-collection",
+          "title" => "Still Root"
+        })
+
+      assert response = json_response(conn, 200)
+      assert Map.has_key?(response["data"], "catalog_id")
+      assert response["data"]["catalog_id"] == nil
+    end
+
+    test "root-level collections omit catalog_id on read, like every other nil field", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/collections/root-collection")
+      assert response = json_response(conn, 200)
+      refute Map.has_key?(response, "catalog_id")
     end
   end
 

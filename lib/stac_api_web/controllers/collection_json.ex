@@ -36,6 +36,7 @@ defmodule StacApiWeb.CollectionJSON do
       keywords: collection.keywords,
       providers: collection.providers,
       stac_extensions: collection.stac_extensions || [],
+      catalog_id: collection.catalog_id,
       links: links
     }
 

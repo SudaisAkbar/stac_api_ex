@@ -47,13 +47,15 @@ defmodule StacApiWeb.StacJSONTest do
         providers: [%{"name" => "UT"}],
         summaries: %{"gsd" => [10]},
         stac_extensions: ["ext"],
-        stac_version: "1.0.0"
+        stac_version: "1.0.0",
+        catalog_id: "cat"
       }
 
       stac = CollectionJSON.to_stac(collection, @links)
 
       assert stac.type == "Collection"
       assert stac.id == "coll"
+      assert stac.catalog_id == "cat"
       assert stac.license == "CC-BY-4.0"
       assert stac.keywords == ["a"]
       assert stac.providers == [%{"name" => "UT"}]
@@ -81,8 +83,15 @@ defmodule StacApiWeb.StacJSONTest do
 
       refute Map.has_key?(stac, :title)
       refute Map.has_key?(stac, :license)
+      refute Map.has_key?(stac, :catalog_id)
       assert stac.id == "bare"
       assert stac.stac_extensions == []
+    end
+
+    test "keeps catalog_id under drop_nils when the collection has one" do
+      stac = CollectionJSON.to_stac(%Collection{id: "coll", catalog_id: "cat"}, [], drop_nils: true)
+
+      assert stac.catalog_id == "cat"
     end
   end
 
