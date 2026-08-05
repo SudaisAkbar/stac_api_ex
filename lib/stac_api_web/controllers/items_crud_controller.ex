@@ -3,6 +3,7 @@ defmodule StacApiWeb.ItemsCrudController do
   alias StacApi.Repo
   alias StacApi.Data.{Item, Collection, ItemAsset, Catalog}
   alias StacApiWeb.DynamicLinkGenerator
+  alias StacApiWeb.ItemJSON
   import Ecto.Query
 
   @doc """
@@ -83,18 +84,7 @@ defmodule StacApiWeb.ItemsCrudController do
             # Reconstruct assets from normalized data
             assets = reconstruct_item_assets(item.id, item.stac_extensions || [])
 
-            item_response = %{
-              type: "Feature",
-              stac_version: item.stac_version || "1.0.0",
-              stac_extensions: item.stac_extensions || [],
-              id: item.id,
-              geometry: item.geometry,
-              bbox: item.bbox,
-              properties: item.properties || %{},
-              assets: assets,
-              collection: item.collection_id,
-              links: links
-            }
+            item_response = ItemJSON.to_stac(item, links, assets)
 
             success_response = %{
               success: true,
@@ -163,18 +153,7 @@ defmodule StacApiWeb.ItemsCrudController do
         links = DynamicLinkGenerator.generate_item_links(item, custom_links)
         assets = reconstruct_item_assets(item.id, item.stac_extensions || [])
 
-          item_response = %{
-            type: "Feature",
-            stac_version: item.stac_version || "1.0.0",
-            stac_extensions: item.stac_extensions || [],
-            id: item.id,
-            geometry: item.geometry,
-            bbox: item.bbox,
-            properties: item.properties || %{},
-            assets: assets,
-            collection: item.collection_id,
-            links: links
-          }
+          item_response = ItemJSON.to_stac(item, links, assets)
 
           conn
           |> put_resp_content_type("application/geo+json")
@@ -211,18 +190,7 @@ defmodule StacApiWeb.ItemsCrudController do
             links = DynamicLinkGenerator.generate_item_links(updated_item, custom_links)
             assets = reconstruct_item_assets(updated_item.id, updated_item.stac_extensions || [])
 
-                item_response = %{
-                  type: "Feature",
-                  stac_version: updated_item.stac_version || "1.0.0",
-                  stac_extensions: updated_item.stac_extensions || [],
-                  id: updated_item.id,
-                  geometry: updated_item.geometry,
-                  bbox: updated_item.bbox,
-                  properties: updated_item.properties || %{},
-                  assets: assets,
-                  collection: updated_item.collection_id,
-                  links: links
-                }
+                item_response = ItemJSON.to_stac(updated_item, links, assets)
 
                 success_response = %{
                   success: true,
@@ -283,18 +251,7 @@ defmodule StacApiWeb.ItemsCrudController do
 
                 assets = reconstruct_item_assets(reloaded_item.id, reloaded_item.stac_extensions || [])
 
-                item_response = %{
-                  type: "Feature",
-                  stac_version: reloaded_item.stac_version || "1.0.0",
-                  stac_extensions: reloaded_item.stac_extensions || [],
-                  id: reloaded_item.id,
-                  geometry: reloaded_item.geometry,
-                  bbox: reloaded_item.bbox,
-                  properties: reloaded_item.properties || %{},
-                  assets: assets,
-                  collection: reloaded_item.collection_id,
-                  links: links
-                }
+                item_response = ItemJSON.to_stac(reloaded_item, links, assets)
 
                 success_response = %{
                   success: true,
@@ -394,18 +351,7 @@ defmodule StacApiWeb.ItemsCrudController do
       links = DynamicLinkGenerator.generate_item_links(item, custom_links)
       assets = reconstruct_item_assets(item.id, item.stac_extensions || [])
 
-      %{
-        type: "Feature",
-        stac_version: item.stac_version || "1.0.0",
-        stac_extensions: item.stac_extensions || [],
-        id: item.id,
-        geometry: item.geometry,
-        bbox: item.bbox,
-        properties: item.properties || %{},
-        assets: assets,
-        collection: item.collection_id,
-        links: links
-      }
+      ItemJSON.to_stac(item, links, assets)
     end)
 
     self_url = "#{base_url}/stac/api/v1/items?limit=#{limit}&offset=#{offset}"

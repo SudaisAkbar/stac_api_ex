@@ -2,6 +2,7 @@ defmodule StacApiWeb.CollectionsCrudController do
   use StacApiWeb, :controller
   alias StacApi.Repo
   alias StacApi.Data.{Collection, Catalog}
+  alias StacApiWeb.CollectionJSON
   alias StacApiWeb.DynamicLinkGenerator
   import Ecto.Query
 
@@ -25,20 +26,7 @@ defmodule StacApiWeb.CollectionsCrudController do
             custom_links = Map.get(collection_attrs, "links", [])
             links = DynamicLinkGenerator.generate_collection_links(collection, custom_links)
             
-            collection_response = %{
-              stac_version: collection.stac_version || "1.0.0",
-              type: "Collection",
-              id: collection.id,
-              title: collection.title,
-              description: collection.description,
-              license: collection.license,
-              extent: collection.extent,
-              summaries: collection.summaries,
-              keywords: collection.keywords,
-              providers: collection.providers,
-              stac_extensions: collection.stac_extensions || [],
-              links: links
-            }
+            collection_response = CollectionJSON.to_stac(collection, links)
 
             success_response = %{
               success: true,
@@ -101,22 +89,7 @@ defmodule StacApiWeb.CollectionsCrudController do
         custom_links = collection.links || []
         links = DynamicLinkGenerator.generate_collection_links(collection, custom_links)
         
-          collection_response = %{
-            stac_version: collection.stac_version || "1.0.0",
-            type: "Collection",
-            id: collection.id,
-            title: collection.title,
-            description: collection.description,
-            license: collection.license,
-            extent: collection.extent,
-            summaries: collection.summaries,
-            keywords: collection.keywords,
-            providers: collection.providers,
-            stac_extensions: collection.stac_extensions || [],
-            links: links
-          }
-          |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-          |> Enum.into(%{})
+          collection_response = CollectionJSON.to_stac(collection, links, drop_nils: true)
 
           json(conn, collection_response)
         end
@@ -143,20 +116,7 @@ defmodule StacApiWeb.CollectionsCrudController do
                 custom_links = Map.get(collection_attrs, "links", [])
                 links = DynamicLinkGenerator.generate_collection_links(updated_collection, custom_links)
                 
-                collection_response = %{
-                  stac_version: updated_collection.stac_version || "1.0.0",
-                  type: "Collection",
-                  id: updated_collection.id,
-                  title: updated_collection.title,
-                  description: updated_collection.description,
-                  license: updated_collection.license,
-                  extent: updated_collection.extent,
-                  summaries: updated_collection.summaries,
-                  keywords: updated_collection.keywords,
-                  providers: updated_collection.providers,
-                  stac_extensions: updated_collection.stac_extensions || [],
-                  links: links
-                }
+                collection_response = CollectionJSON.to_stac(updated_collection, links)
 
                 success_response = %{
                   success: true,
@@ -205,20 +165,7 @@ defmodule StacApiWeb.CollectionsCrudController do
                   DynamicLinkGenerator.generate_collection_links(reloaded_collection, reloaded_collection.links || [])
                 end
                 
-                collection_response = %{
-                  stac_version: reloaded_collection.stac_version || "1.0.0",
-                  type: "Collection",
-                  id: reloaded_collection.id,
-                  title: reloaded_collection.title,
-                  description: reloaded_collection.description,
-                  license: reloaded_collection.license,
-                  extent: reloaded_collection.extent,
-                  summaries: reloaded_collection.summaries,
-                  keywords: reloaded_collection.keywords,
-                  providers: reloaded_collection.providers,
-                  stac_extensions: reloaded_collection.stac_extensions || [],
-                  links: links
-                }
+                collection_response = CollectionJSON.to_stac(reloaded_collection, links)
 
                 success_response = %{
                   success: true,
@@ -294,22 +241,8 @@ defmodule StacApiWeb.CollectionsCrudController do
     collections_with_links = Enum.map(collections, fn collection ->
       custom_links = collection.links || []
       links = DynamicLinkGenerator.generate_collection_links(collection, custom_links)
-      
-      base = %{
-        stac_version: collection.stac_version || "1.0.0",
-        type: "Collection",
-        id: collection.id,
-        title: collection.title,
-        description: collection.description,
-        license: collection.license,
-        extent: collection.extent,
-        summaries: collection.summaries,
-        keywords: collection.keywords,
-        providers: collection.providers,
-        stac_extensions: collection.stac_extensions || [],
-        links: links
-      }
-      base |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Enum.into(%{})
+
+      CollectionJSON.to_stac(collection, links, drop_nils: true)
     end)
 
     json(conn, %{

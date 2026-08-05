@@ -4,6 +4,7 @@ defmodule StacApiWeb.CatalogsCrudController do
   alias StacApi.Data.Catalog
   alias StacApi.Data.Collection
   alias StacApi.Data.Item
+  alias StacApiWeb.CatalogJSON
   alias StacApiWeb.DynamicLinkGenerator
   import Ecto.Query
 
@@ -26,15 +27,7 @@ defmodule StacApiWeb.CatalogsCrudController do
             custom_links = Map.get(catalog_attrs, "links", [])
             links = DynamicLinkGenerator.generate_catalog_links(catalog, custom_links)
             
-            catalog_response = %{
-              stac_version: catalog.stac_version || "1.0.0",
-              type: "Catalog",
-              id: catalog.id,
-              title: catalog.title,
-              description: catalog.description,
-              extent: catalog.extent,
-              links: links
-            }
+            catalog_response = CatalogJSON.to_stac(catalog, links)
 
             success_response = %{
               success: true,
@@ -83,15 +76,7 @@ defmodule StacApiWeb.CatalogsCrudController do
           custom_links = catalog.links || []
           links = DynamicLinkGenerator.generate_catalog_links(catalog, custom_links)
           
-          catalog_response = %{
-            stac_version: catalog.stac_version || "1.0.0",
-            type: "Catalog",
-            id: catalog.id,
-            title: catalog.title,
-            description: catalog.description,
-            extent: catalog.extent,
-            links: links
-          }
+          catalog_response = CatalogJSON.to_stac(catalog, links)
 
           json(conn, catalog_response)
         end
@@ -117,15 +102,7 @@ defmodule StacApiWeb.CatalogsCrudController do
                 custom_links = Map.get(catalog_attrs, "links", [])
                 links = DynamicLinkGenerator.generate_catalog_links(updated_catalog, custom_links)
                 
-                catalog_response = %{
-                  stac_version: updated_catalog.stac_version || "1.0.0",
-                  type: "Catalog",
-                  id: updated_catalog.id,
-                  title: updated_catalog.title,
-                  description: updated_catalog.description,
-                  extent: updated_catalog.extent,
-                  links: links
-                }
+                catalog_response = CatalogJSON.to_stac(updated_catalog, links)
 
                 success_response = %{
                   success: true,
@@ -174,15 +151,7 @@ defmodule StacApiWeb.CatalogsCrudController do
                   DynamicLinkGenerator.generate_catalog_links(reloaded_catalog, reloaded_catalog.links || [])
                 end
                 
-                catalog_response = %{
-                  stac_version: reloaded_catalog.stac_version || "1.0.0",
-                  type: "Catalog",
-                  id: reloaded_catalog.id,
-                  title: reloaded_catalog.title,
-                  description: reloaded_catalog.description,
-                  extent: reloaded_catalog.extent,
-                  links: links
-                }
+                catalog_response = CatalogJSON.to_stac(reloaded_catalog, links)
 
                 success_response = %{
                   success: true,
@@ -257,16 +226,8 @@ defmodule StacApiWeb.CatalogsCrudController do
     catalogs_with_links = Enum.map(catalogs, fn catalog ->
       custom_links = catalog.links || []
       links = DynamicLinkGenerator.generate_catalog_links(catalog, custom_links)
-      
-      %{
-        stac_version: catalog.stac_version || "1.0.0",
-        type: "Catalog",
-        id: catalog.id,
-        title: catalog.title,
-        description: catalog.description,
-        extent: catalog.extent,
-        links: links
-      }
+
+      CatalogJSON.to_stac(catalog, links)
     end)
 
     json(conn, %{
