@@ -190,6 +190,12 @@ The import can be triggered:
 
 -  **Relationships**: Items reference collections via `collection_id`
 
+-  **Timestamps**: Every schema `use`s `StacApi.Schema` rather than `Ecto.Schema`, which
+   fixes the timestamp type (`:utc_datetime`) in one place. This is what makes stored
+   timestamps render as RFC 3339 with an offset; a `NaiveDateTime` would silently render
+   without one and fail STAC conformance. See
+   [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#timestamps).
+
   
 
 ## HTML Browser Interface
@@ -304,13 +310,22 @@ StacApi/
 
 │ │ ├── SearchController.ex
 
-│ │ └── StacBrowserController.ex
+│ │ ├── StacBrowserController.ex
+
+│ │ └── CatalogJSON.ex / CollectionJSON.ex / ItemJSON.ex # Management API serializers
 
 │ └── Router.ex
+
+├── Schema.ex # Shared Ecto schema base (timestamp type)
 
 └── Repo.ex # Database interface
 
 ```
+
+Management API responses are built by one serializer module per type, so each STAC
+representation is defined once instead of being rebuilt inline in every controller action.
+The public STAC API keeps its own representations (`CollectionsController.sanitize_collection/1`,
+`Search.serialize_item_for_api/1`) and does not share these.
 
   
 
@@ -537,6 +552,18 @@ stac_data_path:  System.get_env("STAC_DATA_PATH") || "priv/stac_data"
 
 - Full CRUD for catalogs, collections, and items
 - Bulk item import (`POST /stac/manage/v1/items/import`)
+
+Responses here carry two fields beyond the STAC ones:
+
+- `created` / `updated` — RFC 3339 UTC, top level on catalogs and collections, inside
+  `properties` on items (STAC Common Metadata placement). Useful for detecting that a
+  resource changed server-side before overwriting it.
+- `catalog_id` on collections — the owning catalog, or `null` for root-level collections.
+  The `parent` link deliberately points at the STAC root for every collection, so this is
+  the only way to see which catalog a collection belongs to.
+
+See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#management-api-response-fields)
+for the caveats (server timestamps override client-supplied ones; `GET` omits nil fields).
 
 ### Browser Interface
 

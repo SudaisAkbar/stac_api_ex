@@ -26,6 +26,7 @@ This is a **Phoenix-based STAC (SpatioTemporal Asset Catalog) API** implementati
 - **Private/Public Catalogs**: Support for private catalogs that require authentication
 - **PostGIS Integration**: Spatial data storage and querying using PostgreSQL with PostGIS
 - **STAC Compliance**: Follows STAC 1.0.0 specification
+- **Common Metadata Timestamps**: `created` / `updated` exposed as RFC 3339 on the Management API, enabling write-conflict detection for syncing clients
 - **Web Interface**: HTML browser interface for exploring STAC data
 - **Cascade Deletes**: Automatic deletion of child resources when parent is deleted
 
@@ -46,6 +47,7 @@ This is a **Phoenix-based STAC (SpatioTemporal Asset Catalog) API** implementati
 
 ```
 StacApi/
+├── Schema.ex                # Shared Ecto schema base (timestamp type)
 ├── Data/                    # Data layer (Ecto schemas)
 │   ├── Catalog.ex          # Catalog schema
 │   ├── Collection.ex       # Collection schema
@@ -61,7 +63,11 @@ StacApi/
 │   │   ├── CatalogsCrudController.ex  # Management: catalog CRUD
 │   │   ├── CollectionsCrudController.ex # Management: collection CRUD
 │   │   ├── ItemsCrudController.ex     # Management: item CRUD + bulk import
-│   │   └── StacBrowserController.ex   # Web GUI
+│   │   ├── StacBrowserController.ex   # Web GUI
+│   │   ├── CatalogJSON.ex             # Management: catalog serializer
+│   │   ├── CollectionJSON.ex          # Management: collection serializer
+│   │   ├── ItemJSON.ex                # Management: item serializer
+│   │   └── STACDateTime.ex            # RFC 3339 timestamp rendering
 │   ├── Plugs/              # Middleware
 │   │   ├── AuthPlug.ex     # Write authentication
 │   │   └── ReadAuthPlug.ex # Read authentication
@@ -69,6 +75,29 @@ StacApi/
 │
 └── Repo.ex                  # Database repository
 ```
+
+### Response Serialization
+
+The Management API builds its responses through one serializer module per type, so each
+STAC representation is defined exactly once rather than being rebuilt inline in every
+controller action:
+
+| Module | Entry point | Used by |
+|---|---|---|
+| `StacApiWeb.CatalogJSON` | `to_stac/2` | `CatalogsCrudController` (create/show/update/patch/index) |
+| `StacApiWeb.CollectionJSON` | `to_stac/3` | `CollectionsCrudController` (create/show/update/patch/index) |
+| `StacApiWeb.ItemJSON` | `to_stac/3` | `ItemsCrudController` (create/show/update/patch/index) |
+
+Links and assets are passed in by the caller rather than computed inside the serializer:
+the link set varies per request (custom links from the request body on writes, persisted
+links on reads) and assets require a database round-trip.
+
+`CollectionJSON.to_stac/3` accepts `drop_nils: true`, which the read actions pass. This
+preserves a long-standing difference in the Management API: `GET` omits nil-valued fields
+while `POST` / `PUT` / `PATCH` return them as `null`.
+
+The **public** STAC API does not use these modules — it has its own representations in
+`CollectionsController.sanitize_collection/1` and `StacApi.Data.Search.serialize_item_for_api/1`.
 
 ---
 
@@ -187,6 +216,27 @@ All endpoints under this namespace require the `X-API-Key` header with a **read-
 - `PUT /stac/manage/v1/items/:id` - Full replacement of an item
 - `PATCH /stac/manage/v1/items/:id` - Partial update of an item
 - `DELETE /stac/manage/v1/items/:id` - Delete an item
+
+#### Management API Response Fields
+
+Beyond the STAC fields, Management API responses carry:
+
+| Field | Where | Notes |
+|---|---|---|
+| `created` / `updated` | Catalogs, collections: top level. Items: inside `properties` | RFC 3339 UTC (`2026-08-05T21:48:19Z`), from `inserted_at` / `updated_at`. Placement follows STAC Common Metadata. |
+| `catalog_id` | Collections | The owning catalog, or `null` for root-level collections. Not a STAC field — the `parent` link deliberately points at the STAC root for every collection, since catalogs have no conformant route, so this is the only way to see the relationship. |
+
+Two behaviours to be aware of when consuming these:
+
+- **Server timestamps win.** Any `created` / `updated` a client sends in an item's
+  `properties` is replaced by the server's own values on the way out. A client that got its
+  own value echoed back could not detect that the server had been written to meanwhile,
+  which is the point of exposing them.
+- **`GET` omits nil fields.** Collection reads drop nil-valued fields, so a root-level
+  collection has no `catalog_id` key at all, while writes return it as `null`.
+
+`created` / `updated` are currently second-precision, so two writes within the same second
+are indistinguishable — relevant if you use `updated` for write-conflict detection.
 
 ### 3. Web Interface Endpoints
 
@@ -335,6 +385,39 @@ X-API-Key: your-api-key-here
 - inserted_at (timestamp)
 - updated_at (timestamp)
 ```
+
+### Timestamps
+
+All four tables carry `inserted_at` / `updated_at`, and `items` additionally has the STAC
+observation `datetime`. Every one of these columns is `timestamp(0) without time zone`.
+
+The Elixir-side type is declared **once**, in `StacApi.Schema`, which every schema module
+`use`s in place of `use Ecto.Schema`:
+
+```elixir
+@timestamps_opts [type: :utc_datetime]
+```
+
+This matters on the wire: a `NaiveDateTime` renders as `2026-08-05T21:48:19` — no offset,
+not valid RFC 3339, not STAC-conformant, and nothing signals the problem. A UTC `DateTime`
+renders as `2026-08-05T21:48:19Z`. Declaring the type centrally makes the correct rendering
+the default rather than something each serializer has to remember.
+
+Note that Ecto's `:utc_datetime` maps to Postgres `timestamp`, **not** `timestamptz` —
+declaring it does not by itself give the column a time zone. Values are written as UTC by
+Ecto, which is what makes the naive columns safe to read today.
+
+Two known consequences of the current `timestamp(0) without time zone` columns:
+
+- Second precision only, which bounds how finely `updated` can detect concurrent writes.
+- `update_collection_extent/1` compares `items.datetime` against `timestamptz` values cast
+  out of `properties`, which Postgres resolves using the **session** `TimeZone`. Correct
+  under a UTC session; not correct by construction.
+
+Both are tracked in issue #20, which covers migrating these columns to `timestamptz(6)`
+and flipping `StacApi.Schema` to `:utc_datetime_usec` (the two must land together —
+declaring microsecond precision over a `timestamp(0)` column just makes Postgres truncate
+on write and return a fake `.000000`).
 
 ### Relationships
 
@@ -722,16 +805,24 @@ X-API-Key: dev-api-key-2024
 
 ```json
 {
-  "id": "satellite-imagery",
-  "title": "Satellite Imagery Catalog",
-  "description": "Collection of satellite imagery datasets",
-  "type": "Catalog",
-  "stac_version": "1.0.0",
-  "links": [...],
-  "depth": 0,
-  "private": false
+  "success": true,
+  "message": "Catalog created successfully",
+  "data": {
+    "id": "satellite-imagery",
+    "title": "Satellite Imagery Catalog",
+    "description": "Collection of satellite imagery datasets",
+    "type": "Catalog",
+    "stac_version": "1.0.0",
+    "extent": null,
+    "created": "2026-08-05T21:48:19Z",
+    "updated": "2026-08-05T21:48:19Z",
+    "links": [...]
+  }
 }
 ```
+
+Write operations (`POST`, `PUT`, `PATCH`, `DELETE`) wrap the resource in a
+`success` / `message` / `data` envelope; `GET` returns the resource directly.
 
 ### 2. Create a Nested Catalog
 
@@ -779,6 +870,24 @@ X-API-Key: dev-api-key-2024
 }
 ```
 
+**Response** (`data`, envelope omitted):
+
+```json
+{
+  "id": "sentinel-2-l2a",
+  "type": "Collection",
+  "title": "Sentinel-2 Level-2A",
+  "license": "CC-BY-4.0",
+  "catalog_id": "satellite-imagery",
+  "stac_version": "1.0.0",
+  "stac_extensions": [],
+  "extent": {...},
+  "created": "2026-08-05T21:48:19Z",
+  "updated": "2026-08-05T21:48:19Z",
+  "links": [...]
+}
+```
+
 ### 4. Create an Item
 
 **Request:**
@@ -814,6 +923,27 @@ X-API-Key: dev-api-key-2024
       "title": "Red band"
     }
   }
+}
+```
+
+**Response** (`data`, envelope omitted) — note `created` / `updated` sit inside
+`properties` for items, unlike catalogs and collections:
+
+```json
+{
+  "id": "sentinel-2-l2a-20240101",
+  "type": "Feature",
+  "collection": "sentinel-2-l2a",
+  "stac_version": "1.0.0",
+  "geometry": {...},
+  "bbox": [0, 0, 1, 1],
+  "properties": {
+    "eo:cloud_cover": 5.2,
+    "created": "2026-08-05T21:48:19Z",
+    "updated": "2026-08-05T21:48:19Z"
+  },
+  "assets": {...},
+  "links": [...]
 }
 ```
 
