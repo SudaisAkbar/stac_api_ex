@@ -91,8 +91,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "First item"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "First item"}
       }
 
       item2_params = %{
@@ -100,8 +99,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [10, 10]},
         "bbox" => [9, 9, 11, 11],
-        "datetime" => "2024-01-02T12:00:00Z",
-        "properties" => %{"description" => "Second item"}
+        "properties" => %{"datetime" => "2024-01-02T12:00:00Z", "description" => "Second item"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item1_params)
@@ -165,8 +163,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [5, 5]},
         "bbox" => [4, 4, 6, 6],
-        "datetime" => "2024-01-15T12:00:00Z",
-        "properties" => %{"description" => "Specific test item", "source" => "test"}
+        "properties" => %{"datetime" => "2024-01-15T12:00:00Z", "description" => "Specific test item", "source" => "test"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item_params)
@@ -238,8 +235,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
         "collection_id" => "private-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [25.0, 58.5]},
         "bbox" => [24.0, 57.5, 26.0, 59.5],
-        "datetime" => "2024-06-01T12:00:00Z",
-        "properties" => %{"description" => "Private item"}
+        "properties" => %{"datetime" => "2024-06-01T12:00:00Z", "description" => "Private item"}
       })
 
       :ok
@@ -447,9 +443,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
           "coordinates" => [[[21.0, 57.0], [22.0, 57.0], [22.0, 58.0], [21.0, 58.0], [21.0, 57.0]]]
         },
         "bbox" => [21.0, 57.0, 22.0, 58.0],
-        "datetime" => nil,
-        "properties" => %{
-          "datetime" => nil,
+        "properties" => %{"datetime" => nil, 
           "start_datetime" => "2017-04-01T00:00:00Z",
           "end_datetime" => "2017-05-31T23:59:59Z"
         }
@@ -464,9 +458,7 @@ defmodule StacApiWeb.CollectionsControllerTest do
           "coordinates" => [[[26.0, 58.0], [28.0, 58.0], [28.0, 60.0], [26.0, 60.0], [26.0, 58.0]]]
         },
         "bbox" => [26.0, 58.0, 28.0, 60.0],
-        "datetime" => nil,
-        "properties" => %{
-          "datetime" => nil,
+        "properties" => %{"datetime" => nil, 
           "start_datetime" => "2024-09-01T00:00:00Z",
           "end_datetime" => "2024-10-31T23:59:59Z"
         }

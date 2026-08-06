@@ -19,7 +19,31 @@ defmodule StacApiWeb.SearchController do
     end
 
   authenticated = conn.assigns[:authenticated] || false
-  
+
+  case validate_datetime_param(search_params) do
+    :ok -> run_search(conn, search_params, authenticated)
+    {:error, reason} ->
+      conn
+      |> put_status(:bad_request)
+      |> json(%{"error" => "Invalid datetime parameter: it #{reason}"})
+  end
+  end
+
+  # A datetime the server cannot parse must not be silently dropped — that would
+  # answer a narrow query with the whole catalogue.
+  defp validate_datetime_param(params) do
+    case params[:datetime] || params["datetime"] do
+      nil -> :ok
+      "" -> :ok
+      value ->
+        case StacApi.Temporal.parse_datetime_param(value) do
+          {:ok, _parsed} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp run_search(conn, search_params, authenticated) do
   items =
     Search.search(search_params, authenticated)
     |> Enum.map(&ensure_item_struct/1)

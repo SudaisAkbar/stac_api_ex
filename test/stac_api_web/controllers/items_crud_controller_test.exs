@@ -41,7 +41,6 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "id" => "tz-sensitive-item",
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
-        "datetime" => "2024-06-15T10:00:00Z",
         "properties" => %{"datetime" => "2024-06-15T10:00:00Z"}
       })
 
@@ -53,6 +52,162 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
     end
   end
 
+  describe "STAC temporal conformance" do
+    defp item_params(id, properties) do
+      %{
+        "type" => "Feature",
+        "id" => id,
+        "collection" => "test-collection",
+        "stac_version" => "1.0.0",
+        "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
+        "properties" => properties
+      }
+    end
+
+    test "accepts a spec-shaped item and populates the datetime column", %{conn: conn} do
+      conn = post(conn, ~p"/stac/manage/v1/items", item_params("spec-item", %{"datetime" => "2024-05-01T18:27:48Z"}))
+      assert json_response(conn, 201)
+
+      item = Repo.get(StacApi.Data.Item, "spec-item")
+      assert item.datetime == ~U[2024-05-01 18:27:48.000000Z]
+      assert item.start_datetime == nil
+      assert item.end_datetime == nil
+    end
+
+    test "accepts a range item and populates start/end columns", %{conn: conn} do
+      params =
+        item_params("range-item", %{
+          "datetime" => nil,
+          "start_datetime" => "2024-05-01T18:27:00Z",
+          "end_datetime" => "2024-05-01T18:28:30Z"
+        })
+
+      assert json_response(post(conn, ~p"/stac/manage/v1/items", params), 201)
+
+      item = Repo.get(StacApi.Data.Item, "range-item")
+      assert item.datetime == nil
+      assert item.start_datetime == ~U[2024-05-01 18:27:00.000000Z]
+      assert item.end_datetime == ~U[2024-05-01 18:28:30.000000Z]
+    end
+
+    test "normalizes a non-UTC offset to canonical UTC in stored properties", %{conn: conn} do
+      params = item_params("offset-item", %{"datetime" => "2024-05-01T21:27:48+03:00"})
+      assert json_response(post(conn, ~p"/stac/manage/v1/items", params), 201)
+
+      item = Repo.get(StacApi.Data.Item, "offset-item")
+      assert item.datetime == ~U[2024-05-01 18:27:48.000000Z]
+      assert item.properties["datetime"] == "2024-05-01T18:27:48Z"
+
+      # …and every endpoint renders the same string
+      manage = json_response(get(conn, ~p"/stac/manage/v1/items/offset-item"), 200)
+      assert manage["properties"]["datetime"] == "2024-05-01T18:27:48Z"
+
+      public =
+        json_response(get(build_conn(), ~p"/stac/api/v1/collections/test-collection/items/offset-item"), 200)
+
+      assert public["properties"]["datetime"] == "2024-05-01T18:27:48Z"
+    end
+
+    test "preserves sub-second precision", %{conn: conn} do
+      params = item_params("usec-item", %{"datetime" => "2024-05-01T18:27:48.123456Z"})
+      assert json_response(post(conn, ~p"/stac/manage/v1/items", params), 201)
+
+      assert Repo.get(StacApi.Data.Item, "usec-item").datetime == ~U[2024-05-01 18:27:48.123456Z]
+    end
+
+    for {label, value} <- [
+          {"a naive datetime", "2024-05-01T18:27:48"},
+          {"a bare date", "2024-05-01"},
+          {"an unparseable string", "not-a-date"}
+        ] do
+      test "rejects #{label} instead of storing null", %{conn: conn} do
+        params = item_params("bad-item", %{"datetime" => unquote(value)})
+        conn = post(conn, ~p"/stac/manage/v1/items", params)
+
+        assert response = json_response(conn, 400)
+        assert response["error"] =~ "properties.datetime"
+        refute Repo.get(StacApi.Data.Item, "bad-item")
+      end
+    end
+
+    test "rejects a null datetime without a range", %{conn: conn} do
+      conn = post(conn, ~p"/stac/manage/v1/items", item_params("no-time", %{"datetime" => nil}))
+
+      assert response = json_response(conn, 400)
+      assert response["error"] =~ "start_datetime"
+    end
+
+    test "rejects a range missing its end", %{conn: conn} do
+      params =
+        item_params("half-range", %{"datetime" => nil, "start_datetime" => "2024-05-01T18:27:00Z"})
+
+      assert response = json_response(post(conn, ~p"/stac/manage/v1/items", params), 400)
+      assert response["error"] =~ "both required"
+    end
+
+    test "rejects a reversed range", %{conn: conn} do
+      params =
+        item_params("reversed", %{
+          "datetime" => nil,
+          "start_datetime" => "2024-05-01T18:28:30Z",
+          "end_datetime" => "2024-05-01T18:27:00Z"
+        })
+
+      assert response = json_response(post(conn, ~p"/stac/manage/v1/items", params), 400)
+      assert response["error"] =~ "must not be later than"
+    end
+
+    test "rejects a naive start_datetime", %{conn: conn} do
+      params =
+        item_params("naive-range", %{
+          "datetime" => nil,
+          "start_datetime" => "2024-05-01T18:27:00",
+          "end_datetime" => "2024-05-01T18:28:30Z"
+        })
+
+      assert response = json_response(post(conn, ~p"/stac/manage/v1/items", params), 400)
+      assert response["error"] =~ "properties.start_datetime"
+      assert response["error"] =~ "UTC offset"
+    end
+
+    test "bulk import rejects a non-conformant feature", %{conn: conn} do
+      conn =
+        post(conn, ~p"/stac/manage/v1/items/import", %{
+          "features" => [
+            item_params("bulk-ok", %{"datetime" => "2024-05-01T18:27:48Z"}),
+            item_params("bulk-bad", %{"datetime" => "2024-05-01T18:27:48"})
+          ]
+        })
+
+      assert response = json_response(conn, 200)
+      assert response["imported"] == 1
+      assert response["failed"] == 1
+      assert Repo.get(StacApi.Data.Item, "bulk-ok")
+      refute Repo.get(StacApi.Data.Item, "bulk-bad")
+    end
+
+    test "an instant item contributes a closed collection extent", %{conn: conn} do
+      post(conn, ~p"/stac/manage/v1/items", item_params("extent-item", %{"datetime" => "2024-05-01T18:27:48Z"}))
+
+      collection = Repo.get(StacApi.Data.Collection, "test-collection")
+      assert [["2024-05-01T18:27:48Z", "2024-05-01T18:27:48Z"]] = collection.extent["temporal"]["interval"]
+    end
+
+    test "a range item contributes its full span to the collection extent", %{conn: conn} do
+      params =
+        item_params("extent-range", %{
+          "datetime" => nil,
+          "start_datetime" => "2024-05-01T18:27:00Z",
+          "end_datetime" => "2024-05-01T18:28:30Z"
+        })
+
+      post(conn, ~p"/stac/manage/v1/items", params)
+
+      collection = Repo.get(StacApi.Data.Collection, "test-collection")
+      assert [["2024-05-01T18:27:00Z", "2024-05-01T18:28:30Z"]] = collection.extent["temporal"]["interval"]
+    end
+  end
+
   describe "POST /items - create item" do
     test "creates an item successfully", %{conn: conn} do
       params = %{
@@ -61,8 +216,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "stac_version" => "1.0.0",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "Test item", "source" => "test"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Test item", "source" => "test"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -81,8 +235,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [10, 10]},
         "bbox" => [9, 9, 11, 11],
-        "datetime" => "2024-01-02T12:00:00Z",
-        "properties" => %{"description" => "Item with assets"},
+        "properties" => %{"datetime" => "2024-01-02T12:00:00Z", "description" => "Item with assets"},
         "assets" => %{
           "thumbnail" => %{
             "href" => "https://example.com/thumb.jpg",
@@ -111,8 +264,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", params)
@@ -127,8 +279,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -141,8 +292,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "id" => "no-geometry-item",
         "collection_id" => "test-collection",
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -156,8 +306,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "non-existent-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -173,8 +322,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "First"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "First"}
       }
 
       item2_params = %{
@@ -182,8 +330,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [10, 10]},
         "bbox" => [9, 9, 11, 11],
-        "datetime" => "2024-01-02T12:00:00Z",
-        "properties" => %{"description" => "Second"}
+        "properties" => %{"datetime" => "2024-01-02T12:00:00Z", "description" => "Second"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item1_params)
@@ -232,8 +379,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [5, 5]},
         "bbox" => [4, 4, 6, 6],
-        "datetime" => "2024-01-15T12:00:00Z",
-        "properties" => %{"description" => "Show test"}
+        "properties" => %{"datetime" => "2024-01-15T12:00:00Z", "description" => "Show test"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item_params)
@@ -279,8 +425,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "Original"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Original"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item_params)
@@ -295,8 +440,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [10, 10]},
         "bbox" => [9, 9, 11, 11],
-        "datetime" => "2024-01-02T12:00:00Z",
-        "properties" => %{"description" => "Updated"},
+        "properties" => %{"datetime" => "2024-01-02T12:00:00Z", "description" => "Updated"},
         "stac_version" => "1.0.0"
       }
 
@@ -314,8 +458,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{},
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"},
         "stac_version" => "1.0.0"
       }
 
@@ -331,8 +474,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "Original", "source" => "test"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Original", "source" => "test"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item_params)
@@ -343,7 +485,11 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
     test "partially updates an item", %{conn: conn} do
       patch_params = %{
         "id" => "patch-item",
-        "properties" => %{"description" => "Patched", "source" => "test"}
+        "properties" => %{
+          "datetime" => "2024-01-01T12:00:00Z",
+          "description" => "Patched",
+          "source" => "test"
+        }
       }
 
       conn = patch(conn, ~p"/stac/manage/v1/items/patch-item", patch_params)
@@ -352,6 +498,33 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
       assert response["success"] == true
       assert response["data"]["properties"]["description"] == "Patched"
       assert response["data"]["properties"]["source"] == "test"
+    end
+
+    test "rejects a properties replacement that would drop the item's datetime", %{conn: conn} do
+      # PATCH replaces `properties` wholesale rather than merging, so omitting
+      # datetime here would silently erase the item's temporal information.
+      conn =
+        patch(conn, ~p"/stac/manage/v1/items/patch-item", %{
+          "id" => "patch-item",
+          "properties" => %{"description" => "No datetime"}
+        })
+
+      assert response = json_response(conn, 400)
+      assert response["error"] =~ "properties.datetime is required"
+    end
+
+    test "leaves temporal fields untouched when properties are not supplied", %{conn: conn} do
+      before = json_response(get(conn, ~p"/stac/manage/v1/items/patch-item"), 200)
+
+      patch(conn, ~p"/stac/manage/v1/items/patch-item", %{
+        "id" => "patch-item",
+        "bbox" => [-2, -2, 2, 2]
+      })
+
+      after_patch = json_response(get(conn, ~p"/stac/manage/v1/items/patch-item"), 200)
+
+      assert after_patch["properties"]["datetime"] == before["properties"]["datetime"]
+      assert after_patch["bbox"] == [-2, -2, 2, 2]
     end
 
     test "returns 404 when patching non-existent item", %{conn: conn} do
@@ -369,8 +542,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       post(conn, ~p"/stac/manage/v1/items", item_params)
@@ -405,16 +577,14 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
             "collection_id" => "test-collection",
             "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
             "bbox" => [-1, -1, 1, 1],
-            "datetime" => "2024-01-01T12:00:00Z",
-            "properties" => %{"description" => "Bulk 1"}
+            "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Bulk 1"}
           },
           %{
             "id" => "bulk-item-2",
             "collection_id" => "test-collection",
             "geometry" => %{"type" => "Point", "coordinates" => [10, 10]},
             "bbox" => [9, 9, 11, 11],
-            "datetime" => "2024-01-02T12:00:00Z",
-            "properties" => %{"description" => "Bulk 2"}
+            "properties" => %{"datetime" => "2024-01-02T12:00:00Z", "description" => "Bulk 2"}
           }
         ]
       }
@@ -439,16 +609,14 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
             "collection_id" => "test-collection",
             "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
             "bbox" => [-1, -1, 1, 1],
-            "datetime" => "2024-01-01T12:00:00Z",
-            "properties" => %{}
+            "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
           },
           %{
             # Missing collection_id
             "id" => "invalid-bulk-item",
             "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
             "bbox" => [-1, -1, 1, 1],
-            "datetime" => "2024-01-01T12:00:00Z",
-            "properties" => %{}
+            "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
           }
         ]
       }
@@ -477,8 +645,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{},
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"},
         "assets" => %{
           "thumbnail" => %{
             "href" => "https://example.com/thumb.jpg",
@@ -508,8 +675,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -532,8 +698,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
           ]]
         },
         "bbox" => [0, 0, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
 
       conn = post(conn, ~p"/stac/manage/v1/items", params)
@@ -569,8 +734,7 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "collection_id" => "private-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z"}
       }
       post(conn, ~p"/stac/manage/v1/items", item_params)
 
@@ -596,7 +760,6 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
         "id" => "timestamped-item",
         "collection_id" => "test-collection",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
-        "datetime" => "2024-01-01T12:00:00Z",
         "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Timestamped"}
       })
 

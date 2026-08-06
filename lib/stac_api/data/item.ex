@@ -11,7 +11,12 @@ defmodule StacApi.Data.Item do
     field :stac_extensions, {:array, :string}
     field :geometry, Geo.PostGIS.Geometry
     field :bbox, {:array, :float}
+    # STAC Common Metadata temporal fields. `datetime` is null for items that
+    # describe a range, in which case start/end are mandatory — see
+    # StacApiWeb.ItemsCrudController.temporal_from_properties/1.
     field :datetime, :utc_datetime_usec
+    field :start_datetime, :utc_datetime_usec
+    field :end_datetime, :utc_datetime_usec
     field :properties, :map
     field :assets, :map
     field :links, {:array, :map}
@@ -24,7 +29,8 @@ defmodule StacApi.Data.Item do
   def changeset(item, attrs) do
     item
     |> cast(attrs, [:id, :stac_version, :stac_extensions, :geometry, :bbox,
-                    :datetime, :properties, :assets, :links, :collection_id])
+                    :datetime, :start_datetime, :end_datetime,
+                    :properties, :assets, :links, :collection_id])
     |> validate_required([:id, :geometry, :collection_id])
     |> foreign_key_constraint(:collection_id)
   end

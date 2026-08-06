@@ -5,6 +5,7 @@ defmodule StacApi.Data.Search do
 
   import Ecto.Query
   alias StacApi.Repo
+  alias StacApi.Temporal
   alias StacApi.Data.{Item, Collection, ItemAsset, Catalog}
 
   def search(params \\ %{}, authenticated \\ false) do
@@ -23,6 +24,8 @@ defmodule StacApi.Data.Search do
       geometry: fragment("ST_AsGeoJSON(?::geometry) as geometry", i.geometry),
       bbox: i.bbox,
       datetime: i.datetime,
+      start_datetime: i.start_datetime,
+      end_datetime: i.end_datetime,
       properties: i.properties,
       assets: i.assets,
       links: i.links,
@@ -47,6 +50,8 @@ defp convert_to_item_struct(item_map) do
     geometry: parse_geometry(item_map.geometry),
     bbox: item_map.bbox,
     datetime: item_map.datetime,
+    start_datetime: item_map.start_datetime,
+    end_datetime: item_map.end_datetime,
     properties: item_map.properties,
     assets: %{},  # Will be reconstructed from normalized data
     links: item_map.links,
@@ -139,34 +144,50 @@ defp convert_geojson_geometry(item), do: item
       where: fragment("ST_Intersects(?, ST_GeomFromText(?, 4326)::geography)", i.geometry, ^bbox_wkt)
   end
 
+  # An item's temporal footprint is either an instant (`datetime`) or a range
+  # (`start_datetime`/`end_datetime`, used when `datetime` is null). Matching only
+  # `datetime` made every range-only item invisible to temporal search, so both
+  # forms are collapsed into a [lo, hi] window and intersected with the query.
   defp filter_by_datetime(query, nil), do: query
+
   defp filter_by_datetime(query, datetime) when is_binary(datetime) do
-    case String.split(datetime, "/") do
-      [start_str, end_str] ->
-        start_dt = parse_datetime(start_str)
-        end_dt = parse_datetime(end_str)
+    case Temporal.parse_datetime_param(datetime) do
+      {:ok, {:instant, instant}} ->
+        from i in query,
+          where:
+            fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^instant and
+              fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^instant
+
+      {:ok, {:interval, start_dt, end_dt}} ->
         filter_by_datetime_range(query, start_dt, end_dt)
-      [single] ->
-        single_dt = parse_datetime(single)
-        if single_dt do
-          from i in query, where: i.datetime == ^single_dt
-        else
-          query
-        end
-      _ -> query
+
+      # Unparseable values are rejected with a 400 by the controller; this clause
+      # only guards other callers (the HTML browser) from a crash.
+      {:error, _reason} ->
+        query
     end
   end
+
   defp filter_by_datetime(query, _), do: query
 
   defp filter_by_datetime_range(query, start_dt, end_dt) do
     cond do
       start_dt && end_dt ->
-        from i in query, where: i.datetime >= ^start_dt and i.datetime <= ^end_dt
+        from i in query,
+          where:
+            fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^end_dt and
+              fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^start_dt
+
       start_dt ->
-        from i in query, where: i.datetime >= ^start_dt
+        from i in query,
+          where: fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^start_dt
+
       end_dt ->
-        from i in query, where: i.datetime <= ^end_dt
-      true -> query
+        from i in query,
+          where: fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^end_dt
+
+      true ->
+        query
     end
   end
 
@@ -229,40 +250,6 @@ defp convert_geojson_geometry(item), do: item
   end
   defp parse_int(num) when is_integer(num), do: num
   defp parse_int(_), do: 0
-
-  defp parse_datetime(""), do: nil
-  defp parse_datetime(nil), do: nil
-  defp parse_datetime(".."), do: nil
-  defp parse_datetime(datetime_str) when is_binary(datetime_str) do
-    # The HTML <input type="datetime-local"> control emits "YYYY-MM-DDTHH:MM"
-    # by default — pad missing seconds so NaiveDateTime can parse it.
-    padded = pad_seconds(datetime_str)
-
-    cond do
-      match?({:ok, _, _}, DateTime.from_iso8601(padded)) ->
-        {:ok, dt, _} = DateTime.from_iso8601(padded)
-        dt
-
-      match?({:ok, _}, NaiveDateTime.from_iso8601(padded)) ->
-        {:ok, ndt} = NaiveDateTime.from_iso8601(padded)
-        DateTime.from_naive!(ndt, "Etc/UTC")
-
-      match?({:ok, _}, Date.from_iso8601(padded)) ->
-        {:ok, date} = Date.from_iso8601(padded)
-        DateTime.new!(date, ~T[00:00:00], "Etc/UTC")
-
-      true ->
-        nil
-    end
-  end
-  defp parse_datetime(_), do: nil
-
-  defp pad_seconds(str) do
-    case Regex.run(~r/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})($|[Z+\-].*$)/, str) do
-      [_, prefix, rest] -> prefix <> ":00" <> rest
-      _ -> str
-    end
-  end
 
   def serialize_item_for_api(%Item{} = item) do
   # Reconstruct assets from normalized data

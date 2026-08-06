@@ -402,8 +402,7 @@ defmodule StacApiWeb.CollectionsCrudControllerTest do
         "collection_id" => "col-with-items",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => "2024-01-01T12:00:00Z",
-        "properties" => %{"description" => "Test item"}
+        "properties" => %{"datetime" => "2024-01-01T12:00:00Z", "description" => "Test item"}
       }
       conn |> add_auth_header(api_key) |> post(~p"/stac/manage/v1/items", item_params)
 

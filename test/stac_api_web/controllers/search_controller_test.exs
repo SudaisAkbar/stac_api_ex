@@ -49,8 +49,7 @@ defmodule StacApiWeb.SearchControllerTest do
         "stac_version" => "1.0.0",
         "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
         "bbox" => [-1, -1, 1, 1],
-        "datetime" => dt,
-        "properties" => %{"description" => id}
+        "properties" => %{"datetime" => dt, "description" => id}
       })
     end)
 
@@ -193,6 +192,81 @@ defmodule StacApiWeb.SearchControllerTest do
         })
 
       assert ids(json_response(conn, 200)) == ["item-2023"]
+    end
+  end
+
+  describe "temporal search semantics" do
+    setup %{auth_conn: auth_conn} do
+      # An item that describes a range rather than an instant: datetime is null,
+      # so it is only reachable through start_datetime/end_datetime.
+      post(auth_conn, ~p"/stac/manage/v1/items", %{
+        "type" => "Feature",
+        "id" => "range-item",
+        "collection" => "search-test-collection",
+        "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
+        "properties" => %{
+          "datetime" => nil,
+          "start_datetime" => "2025-03-01T00:00:00Z",
+          "end_datetime" => "2025-03-31T00:00:00Z"
+        }
+      })
+
+      :ok
+    end
+
+    test "an instant inside a range item's span matches it", %{conn: conn} do
+      conn = get(conn, ~p"/stac/api/v1/search", %{"datetime" => "2025-03-15T12:00:00Z"})
+      assert "range-item" in ids(json_response(conn, 200))
+    end
+
+    test "an instant outside the span does not match", %{conn: conn} do
+      conn = get(conn, ~p"/stac/api/v1/search", %{"datetime" => "2025-04-15T12:00:00Z"})
+      refute "range-item" in ids(json_response(conn, 200))
+    end
+
+    test "an interval overlapping the span matches", %{conn: conn} do
+      conn =
+        get(conn, ~p"/stac/api/v1/search", %{
+          "datetime" => "2025-03-20T00:00:00Z/2025-06-01T00:00:00Z"
+        })
+
+      assert "range-item" in ids(json_response(conn, 200))
+    end
+
+    test "an interval clear of the span does not match", %{conn: conn} do
+      conn =
+        get(conn, ~p"/stac/api/v1/search", %{
+          "datetime" => "2025-04-01T00:00:00Z/2025-06-01T00:00:00Z"
+        })
+
+      refute "range-item" in ids(json_response(conn, 200))
+    end
+
+    test "an exact instant still matches an instant item", %{conn: conn} do
+      conn = get(conn, ~p"/stac/api/v1/search", %{"datetime" => "2023-06-15T12:00:00Z"})
+      assert ids(json_response(conn, 200)) == ["item-2023"]
+    end
+
+    test "open-ended intervals reach range items", %{conn: conn} do
+      assert "range-item" in ids(json_response(get(conn, ~p"/stac/api/v1/search", %{"datetime" => "2025-01-01T00:00:00Z/.."}), 200))
+      assert "range-item" in ids(json_response(get(conn, ~p"/stac/api/v1/search", %{"datetime" => "../2025-12-31T00:00:00Z"}), 200))
+    end
+
+    test "an unparseable datetime is a 400, not an unfiltered result set", %{conn: conn} do
+      conn = get(conn, ~p"/stac/api/v1/search", %{"datetime" => "last-tuesday"})
+
+      assert response = json_response(conn, 400)
+      assert response["error"] =~ "datetime"
+    end
+
+    test "a reversed interval is a 400", %{conn: conn} do
+      conn =
+        get(conn, ~p"/stac/api/v1/search", %{
+          "datetime" => "2025-06-01T00:00:00Z/2025-01-01T00:00:00Z"
+        })
+
+      assert response = json_response(conn, 400)
+      assert response["error"] =~ "later than"
     end
   end
 end

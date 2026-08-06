@@ -2,6 +2,7 @@ defmodule StacApiWeb.ItemsCrudController do
   use StacApiWeb, :controller
   alias StacApi.Repo
   alias StacApi.Data.{Item, Collection, ItemAsset, Catalog}
+  alias StacApi.Temporal
   alias StacApiWeb.DynamicLinkGenerator
   alias StacApiWeb.ItemJSON
   import Ecto.Query
@@ -424,19 +425,26 @@ defmodule StacApiWeb.ItemsCrudController do
           else
             geometry = parse_geometry(params["geometry"])
 
-            item_attrs = %{
-              "id" => final_id,
-              "collection_id" => collection_id,
-              "stac_version" => params["stac_version"],
-              "stac_extensions" => params["stac_extensions"] || [],
-              "geometry" => geometry,
-              "bbox" => params["bbox"],
-              "datetime" => parse_datetime(params["datetime"]),
-              "properties" => params["properties"],
-              "assets" => params["assets"] || %{},
-              "links" => params["links"] || []
-            }
-            {:ok, item_attrs}
+            case temporal_from_properties(params["properties"]) do
+              {:ok, temporal} ->
+                item_attrs =
+                  %{
+                    "id" => final_id,
+                    "collection_id" => collection_id,
+                    "stac_version" => params["stac_version"],
+                    "stac_extensions" => params["stac_extensions"] || [],
+                    "geometry" => geometry,
+                    "bbox" => params["bbox"],
+                    "assets" => params["assets"] || %{},
+                    "links" => params["links"] || []
+                  }
+                  |> Map.merge(temporal)
+
+                {:ok, item_attrs}
+
+              {:error, reason} ->
+                {:error, reason}
+            end
           end
         end
       end
@@ -459,8 +467,7 @@ defmodule StacApiWeb.ItemsCrudController do
         {:error, "Referenced collection does not exist: #{collection_id}"}
       else
         geometry_value = if params["geometry"], do: parse_geometry(params["geometry"]), else: nil
-        datetime_value = if params["datetime"], do: parse_datetime(params["datetime"]), else: nil
-        
+
         item_attrs = %{}
         |> Map.put("id", params["id"])
         |> maybe_put("collection_id", collection_id)
@@ -468,20 +475,103 @@ defmodule StacApiWeb.ItemsCrudController do
         |> maybe_put("stac_extensions", params["stac_extensions"])
         |> maybe_put("geometry", geometry_value)
         |> maybe_put("bbox", params["bbox"])
-        |> maybe_put("datetime", datetime_value)
-        |> maybe_put("properties", params["properties"])
         |> maybe_put("assets", params["assets"])
         |> maybe_put("links", params["links"])
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
         |> Enum.into(%{})
 
-        {:ok, item_attrs}
+        # Temporal fields are derived from `properties` and are only touched when
+        # properties are being replaced. They are merged after the nil-rejection
+        # above because a nil is meaningful here: switching an item from an
+        # instant to a range must actively clear `datetime`.
+        if Map.has_key?(params, "properties") do
+          case temporal_from_properties(params["properties"]) do
+            {:ok, temporal} -> {:ok, Map.merge(item_attrs, temporal)}
+            {:error, reason} -> {:error, reason}
+          end
+        else
+          {:ok, item_attrs}
+        end
       end
     end
   end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # Derive the temporal columns from a STAC Item's `properties`.
+  #
+  # `properties.datetime` is the only source — STAC has no top-level `datetime` on an
+  # Item, so reading one would mean supporting a shape no conformant client sends.
+  #
+  # Per STAC Common Metadata, `datetime` may be null, but only when both
+  # `start_datetime` and `end_datetime` are given. Every value must be RFC 3339 with a
+  # UTC offset; anything else is a 400 rather than a silently discarded value.
+  #
+  # Returns the columns plus a normalized `properties` map, so the stored JSONB always
+  # holds canonical UTC strings. That is what keeps `GET` output identical across
+  # endpoints and keeps the values safe for any later SQL that touches them.
+  defp temporal_from_properties(properties) when is_map(properties) do
+    with {:ok, datetime} <- parse_property(properties, "datetime"),
+         {:ok, start_datetime} <- parse_property(properties, "start_datetime"),
+         {:ok, end_datetime} <- parse_property(properties, "end_datetime"),
+         :ok <- validate_temporal(datetime, start_datetime, end_datetime) do
+      normalized =
+        properties
+        |> Map.put("datetime", Temporal.to_rfc3339(datetime))
+        |> put_or_drop("start_datetime", Temporal.to_rfc3339(start_datetime))
+        |> put_or_drop("end_datetime", Temporal.to_rfc3339(end_datetime))
+
+      {:ok,
+       %{
+         "datetime" => datetime,
+         "start_datetime" => start_datetime,
+         "end_datetime" => end_datetime,
+         "properties" => normalized
+       }}
+    end
+  end
+
+  defp temporal_from_properties(nil), do: {:error, "properties is required and must be an object"}
+  defp temporal_from_properties(_), do: {:error, "properties must be an object"}
+
+  # An absent key and an explicit null mean the same thing: no value.
+  defp parse_property(properties, key) do
+    case Map.get(properties, key) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        case Temporal.parse_rfc3339(value) do
+          {:ok, datetime} -> {:ok, datetime}
+          {:error, reason} -> {:error, "properties.#{key} #{reason}"}
+        end
+    end
+  end
+
+  defp validate_temporal(nil, nil, nil) do
+    {:error,
+     "properties.datetime is required; use null together with properties.start_datetime " <>
+       "and properties.end_datetime for items that describe a range"}
+  end
+
+  defp validate_temporal(nil, start_datetime, end_datetime)
+       when is_nil(start_datetime) or is_nil(end_datetime) do
+    {:error,
+     "properties.start_datetime and properties.end_datetime are both required " <>
+       "when properties.datetime is null"}
+  end
+
+  defp validate_temporal(_datetime, start_datetime, end_datetime) do
+    if start_datetime && end_datetime && DateTime.compare(start_datetime, end_datetime) == :gt do
+      {:error, "properties.start_datetime must not be later than properties.end_datetime"}
+    else
+      :ok
+    end
+  end
+
+  defp put_or_drop(map, key, nil), do: Map.delete(map, key)
+  defp put_or_drop(map, key, value), do: Map.put(map, key, value)
 
   defp validate_item_params(params) do
     required_fields = ["id", "geometry"]
@@ -501,19 +591,26 @@ defmodule StacApiWeb.ItemsCrudController do
           # Parse geometry if provided as GeoJSON string
           geometry = parse_geometry(params["geometry"])
 
-          item_attrs = %{
-            "id" => params["id"],
-            "collection_id" => collection_id,
-            "stac_version" => params["stac_version"] || "1.0.0",
-            "stac_extensions" => params["stac_extensions"] || [],
-            "geometry" => geometry,
-            "bbox" => params["bbox"],
-            "datetime" => parse_datetime(params["datetime"]),
-            "properties" => params["properties"] || %{},
-            "assets" => params["assets"] || %{},
-            "links" => params["links"] || []
-          }
-          {:ok, item_attrs}
+          case temporal_from_properties(params["properties"] || %{}) do
+            {:ok, temporal} ->
+              item_attrs =
+                %{
+                  "id" => params["id"],
+                  "collection_id" => collection_id,
+                  "stac_version" => params["stac_version"] || "1.0.0",
+                  "stac_extensions" => params["stac_extensions"] || [],
+                  "geometry" => geometry,
+                  "bbox" => params["bbox"],
+                  "assets" => params["assets"] || %{},
+                  "links" => params["links"] || []
+                }
+                |> Map.merge(temporal)
+
+              {:ok, item_attrs}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
         end
       end
     end
@@ -533,15 +630,6 @@ defmodule StacApiWeb.ItemsCrudController do
     end
   end
   defp parse_geometry(geometry), do: geometry
-
-  defp parse_datetime(nil), do: nil
-  defp parse_datetime(datetime_str) when is_binary(datetime_str) do
-    case DateTime.from_iso8601(datetime_str) do
-      {:ok, datetime, _} -> datetime
-      _ -> nil
-    end
-  end
-  defp parse_datetime(datetime), do: datetime
 
   defp parse_int(str) when is_binary(str) do
     case Integer.parse(str) do
@@ -647,18 +735,22 @@ defmodule StacApiWeb.ItemsCrudController do
     AND i.geometry IS NOT NULL
     """
 
-    # Calculate temporal extent — consider datetime column AND start_datetime/end_datetime
-    # from properties JSONB (STAC items may have datetime=null with start/end_datetime).
+    # Temporal extent from the typed columns. Items may carry an instant
+    # (datetime) or a range (start_datetime/end_datetime), so both ends consider
+    # both — asymmetry here previously produced open-start extents for items that
+    # only had an instant.
+    #
+    # These used to be casts of `properties->>'...'`, which made the result depend
+    # on the session TimeZone and let one unparseable string abort the whole query.
     temporal_sql = """
     SELECT
       LEAST(
         MIN(i.datetime),
-        MIN((i.properties->>'start_datetime')::timestamptz)
+        MIN(i.start_datetime)
       ) AS min_datetime,
       GREATEST(
         MAX(i.datetime),
-        MAX((i.properties->>'end_datetime')::timestamptz),
-        MAX((i.properties->>'datetime')::timestamptz)
+        MAX(i.end_datetime)
       ) AS max_datetime
     FROM items i
     WHERE i.collection_id = $1
