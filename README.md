@@ -577,9 +577,18 @@ normalized to `Z`.
 
 Temporal search matches by intersection with an item's footprint, so range items are
 findable and an instant matches a range containing it. Full rules, including the
-`datetime=<start>/<end>` and `..` query syntax and the `mix stac.backfill_temporal` task
-for pre-existing rows, are in
+`datetime=<start>/<end>` and `..` query syntax, are in
 [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#stac-datetime-handling).
+
+Items created before this was enforced need a one-off backfill, or they stay invisible to
+temporal search — `mix stac.backfill_temporal` in development, and in a release:
+
+```bash
+bin/stac_api eval 'StacApi.Release.backfill_temporal(["--dry-run"])'
+bin/stac_api eval 'StacApi.Release.backfill_temporal()'
+```
+
+See [Deployment order](PROJECT_DOCUMENTATION.md#deployment-order).
 
 ### Browser Interface
 

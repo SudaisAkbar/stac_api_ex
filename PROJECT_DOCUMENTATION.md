@@ -319,11 +319,47 @@ Collection spec:
 
 ### Existing data
 
-`mix stac.backfill_temporal` populates the temporal columns for rows written before this
-was enforced and canonicalizes their `properties` strings. It parses leniently — rescuing
-data already stored rather than rejecting it — and reports how many values needed that
-leniency, since those would now be refused on write. Supports `--dry-run`, and is
-idempotent.
+Rows written before this was enforced have their temporal values only in `properties`,
+leaving `datetime` / `start_datetime` / `end_datetime` empty — which means they are **not
+findable by temporal search and contribute nothing to collection extents**. The backfill
+populates those columns and canonicalizes the `properties` strings.
+
+It parses leniently — rescuing data already stored rather than rejecting it — and reports
+how many values needed that leniency, since those would now be refused on write.
+Unparseable values are left untouched rather than aborting the run. It is idempotent, so a
+second run over consistent data reports zero rows.
+
+Development, via Mix:
+
+```bash
+mix stac.backfill_temporal --dry-run
+mix stac.backfill_temporal
+mix stac.backfill_temporal --batch-size 2000
+```
+
+Production runs as a release, which ships without Mix. Use the release entry point, which
+takes the same switches as a list of strings and starts the repo itself:
+
+```bash
+bin/stac_api eval 'StacApi.Release.backfill_temporal(["--dry-run"])'
+bin/stac_api eval 'StacApi.Release.backfill_temporal()'
+bin/stac_api eval 'StacApi.Release.backfill_temporal(["--batch-size", "2000"])'
+```
+
+Both are thin wrappers over `StacApi.Data.TemporalBackfill.run/1`, so they do exactly the
+same work.
+
+#### Deployment order
+
+1. `bin/stac_api eval 'StacApi.Release.migrate()'` — the `timestamptz(6)` conversion
+   rewrites tables under an `ACCESS EXCLUSIVE` lock, so schedule a window for it.
+2. Deploy the new release.
+3. `bin/stac_api eval 'StacApi.Release.backfill_temporal(["--dry-run"])'`, then without
+   `--dry-run`.
+
+The order is forced: the columns must exist before the new code runs, and the backfill
+uses the new schema. Step 3 takes no exclusive lock and the service stays up, but skipping
+it fails **silently** — temporal search simply returns nothing for pre-existing items.
 
 ### 3. Web Interface Endpoints
 
