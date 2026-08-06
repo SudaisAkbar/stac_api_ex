@@ -11,7 +11,7 @@ defmodule StacApi.Data.Item do
     field :stac_extensions, {:array, :string}
     field :geometry, Geo.PostGIS.Geometry
     field :bbox, {:array, :float}
-    field :datetime, :utc_datetime
+    field :datetime, :utc_datetime_usec
     field :properties, :map
     field :assets, :map
     field :links, {:array, :map}

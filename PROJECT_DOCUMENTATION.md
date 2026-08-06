@@ -223,7 +223,7 @@ Beyond the STAC fields, Management API responses carry:
 
 | Field | Where | Notes |
 |---|---|---|
-| `created` / `updated` | Catalogs, collections: top level. Items: inside `properties` | RFC 3339 UTC (`2026-08-05T21:48:19Z`), from `inserted_at` / `updated_at`. Placement follows STAC Common Metadata. |
+| `created` / `updated` | Catalogs, collections: top level. Items: inside `properties` | RFC 3339 UTC with microseconds (`2026-08-05T21:48:19.248683Z`), from `inserted_at` / `updated_at`. Placement follows STAC Common Metadata. |
 | `catalog_id` | Collections | The owning catalog, or `null` for root-level collections. Not a STAC field — the `parent` link deliberately points at the STAC root for every collection, since catalogs have no conformant route, so this is the only way to see the relationship. |
 
 Two behaviours to be aware of when consuming these:
@@ -235,8 +235,8 @@ Two behaviours to be aware of when consuming these:
 - **`GET` omits nil fields.** Collection reads drop nil-valued fields, so a root-level
   collection has no `catalog_id` key at all, while writes return it as `null`.
 
-`created` / `updated` are currently second-precision, so two writes within the same second
-are indistinguishable — relevant if you use `updated` for write-conflict detection.
+`created` / `updated` are microsecond-precision, so `updated` can be compared before a
+`PATCH` to detect that a resource changed server-side since it was read.
 
 ### 3. Web Interface Endpoints
 
@@ -330,8 +330,8 @@ X-API-Key: your-api-key-here
 - depth (integer, default: 0)
 - private (boolean, default: false)
 - parent_catalog_id (string, foreign key to catalogs.id)
-- inserted_at (timestamp)
-- updated_at (timestamp)
+- inserted_at (timestamptz(6))
+- updated_at (timestamptz(6))
 ```
 
 #### collections
@@ -348,8 +348,8 @@ X-API-Key: your-api-key-here
 - stac_extensions (string array)
 - links (jsonb array)
 - catalog_id (string, foreign key to catalogs.id, nullable)
-- inserted_at (timestamp)
-- updated_at (timestamp)
+- inserted_at (timestamptz(6))
+- updated_at (timestamptz(6))
 ```
 
 #### items
@@ -360,13 +360,13 @@ X-API-Key: your-api-key-here
 - stac_extensions (string array)
 - geometry (geography, PostGIS)
 - bbox (float array)
-- datetime (timestamp)
+- datetime (timestamptz(6), STAC observation time)
 - properties (jsonb)
 - assets (jsonb)
 - links (jsonb array)
 - collection_id (string, foreign key to collections.id)
-- inserted_at (timestamp)
-- updated_at (timestamp)
+- inserted_at (timestamptz(6))
+- updated_at (timestamptz(6))
 ```
 
 #### item_assets
@@ -382,42 +382,70 @@ X-API-Key: your-api-key-here
 - scale (float)
 - offset (float)
 - proj_shape (integer array)
-- inserted_at (timestamp)
-- updated_at (timestamp)
+- created_at (timestamptz(6), asset creation time from STAC `created`)
+- inserted_at (timestamptz(6))
+- updated_at (timestamptz(6))
 ```
 
 ### Timestamps
 
-All four tables carry `inserted_at` / `updated_at`, and `items` additionally has the STAC
-observation `datetime`. Every one of these columns is `timestamp(0) without time zone`.
+All four tables carry `inserted_at` / `updated_at`; `items` additionally has the STAC
+observation `datetime` and `item_assets` a `created_at`. All ten columns are
+**`timestamptz(6)`** — time-zone aware, microsecond precision.
 
 The Elixir-side type is declared **once**, in `StacApi.Schema`, which every schema module
 `use`s in place of `use Ecto.Schema`:
 
 ```elixir
-@timestamps_opts [type: :utc_datetime]
+@timestamps_opts [type: :utc_datetime_usec]
 ```
 
-This matters on the wire: a `NaiveDateTime` renders as `2026-08-05T21:48:19` — no offset,
-not valid RFC 3339, not STAC-conformant, and nothing signals the problem. A UTC `DateTime`
-renders as `2026-08-05T21:48:19Z`. Declaring the type centrally makes the correct rendering
-the default rather than something each serializer has to remember.
+Three things this arrangement buys, each of which was a real defect before:
 
-Note that Ecto's `:utc_datetime` maps to Postgres `timestamp`, **not** `timestamptz` —
-declaring it does not by itself give the column a time zone. Values are written as UTC by
-Ecto, which is what makes the naive columns safe to read today.
+1. **Valid RFC 3339 on the wire.** A `NaiveDateTime` renders as `2026-08-05T21:48:19` — no
+   offset, not STAC-conformant, and nothing signals the problem. A UTC `DateTime` renders
+   as `2026-08-05T21:48:19.248683Z`. Declaring the type centrally makes the correct
+   rendering the default rather than something each serializer must remember.
 
-Two known consequences of the current `timestamp(0) without time zone` columns:
+2. **Timezone-independent comparisons.** `update_collection_extent/1` compares
+   `items.datetime` against `timestamptz` values cast out of `properties`. While `datetime`
+   was naive, Postgres resolved that mix using the **session** `TimeZone` — under a
+   `Europe/Tallinn` session a single item at `10:00Z` produced the interval
+   `[07:00Z, 10:00Z]`. Both sides are now `timestamptz`, so the comparison is between
+   instants and no session setting can move it. Regression test:
+   `"is unaffected by a non-UTC session TimeZone"` in `items_crud_controller_test.exs`.
 
-- Second precision only, which bounds how finely `updated` can detect concurrent writes.
-- `update_collection_extent/1` compares `items.datetime` against `timestamptz` values cast
-  out of `properties`, which Postgres resolves using the **session** `TimeZone`. Correct
-  under a UTC session; not correct by construction.
+3. **Microsecond precision for conflict detection.** At second precision, a client that
+   reads and writes inside the same second cannot tell that the resource changed underneath
+   it. The column precision and the Ecto type have to agree: declaring `_usec` over a
+   `timestamp(0)` column just makes Postgres truncate on write and return a fake `.000000`.
 
-Both are tracked in issue #20, which covers migrating these columns to `timestamptz(6)`
-and flipping `StacApi.Schema` to `:utc_datetime_usec` (the two must land together —
-declaring microsecond precision over a `timestamp(0)` column just makes Postgres truncate
-on write and return a fake `.000000`).
+Worth knowing when adding a schema or migration: Ecto's `:utc_datetime` /
+`:utc_datetime_usec` map to Postgres `timestamp`, **not** `timestamptz`. Declaring the type
+does not by itself give the column a time zone — the migration has to say `timestamptz`
+explicitly. Use `StacApi.Schema` for new schemas so the type stays decided in one place.
+
+#### Converting timestamp columns
+
+Migration `20260806080000_convert_timestamps_to_timestamptz.exs` performed this conversion.
+If you add a naive timestamp column later, convert it the same way:
+
+```sql
+ALTER TABLE items
+  ALTER COLUMN inserted_at TYPE timestamptz(6) USING inserted_at AT TIME ZONE 'UTC';
+```
+
+The `USING ... AT TIME ZONE 'UTC'` clause is **not optional**. Postgres's implicit
+`timestamp -> timestamptz` conversion interprets the naive value in the session `TimeZone`,
+so without it the same migration silently produces different data depending on who runs it
+and from where — verified on a scratch table, where a `Europe/Tallinn` session shifted the
+value by three hours. Every value in these columns was written by Ecto as UTC, so stating
+that explicitly is both correct and reproducible.
+
+Note that changing a column's type rewrites the table under an `ACCESS EXCLUSIVE` lock:
+reads and writes to that table block for the duration. Check table sizes and schedule a
+window before running such a migration against production. The migration is transactional
+and reversible; `down` converts back to `timestamp(0)`.
 
 ### Relationships
 
@@ -814,8 +842,8 @@ X-API-Key: dev-api-key-2024
     "type": "Catalog",
     "stac_version": "1.0.0",
     "extent": null,
-    "created": "2026-08-05T21:48:19Z",
-    "updated": "2026-08-05T21:48:19Z",
+    "created": "2026-08-05T21:48:19.248683Z",
+    "updated": "2026-08-05T21:48:19.248683Z",
     "links": [...]
   }
 }
@@ -882,8 +910,8 @@ X-API-Key: dev-api-key-2024
   "stac_version": "1.0.0",
   "stac_extensions": [],
   "extent": {...},
-  "created": "2026-08-05T21:48:19Z",
-  "updated": "2026-08-05T21:48:19Z",
+  "created": "2026-08-05T21:48:19.248683Z",
+  "updated": "2026-08-05T21:48:19.248683Z",
   "links": [...]
 }
 ```
@@ -939,8 +967,8 @@ X-API-Key: dev-api-key-2024
   "bbox": [0, 0, 1, 1],
   "properties": {
     "eo:cloud_cover": 5.2,
-    "created": "2026-08-05T21:48:19Z",
-    "updated": "2026-08-05T21:48:19Z"
+    "created": "2026-08-05T21:48:19.248683Z",
+    "updated": "2026-08-05T21:48:19.248683Z"
   },
   "assets": {...},
   "links": [...]

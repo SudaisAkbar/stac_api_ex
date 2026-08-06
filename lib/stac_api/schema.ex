@@ -15,17 +15,19 @@ defmodule StacApi.Schema do
   `:utc_datetime` everywhere makes the correct rendering the default rather
   than something each serializer has to remember.
 
-  Note the type is second-precision on purpose: the underlying columns are
-  `timestamp(0)`, so declaring `:utc_datetime_usec` here would only make
-  Postgres truncate on write and hand back a fake `.000000`. Widening the
-  columns and flipping this to `:utc_datetime_usec` go together — see #20.
+  The columns are `timestamptz(6)`, so the type is microsecond-precision. That
+  matters for clients that use `updated` to detect a concurrent write: at second
+  precision, a read and a write inside the same second are indistinguishable.
+  The type and the column precision have to agree — declaring `_usec` over a
+  `timestamp(0)` column just makes Postgres truncate on write and hand back a
+  fake `.000000`.
   """
 
   defmacro __using__(_opts) do
     quote do
       use Ecto.Schema
 
-      @timestamps_opts [type: :utc_datetime]
+      @timestamps_opts [type: :utc_datetime_usec]
     end
   end
 end

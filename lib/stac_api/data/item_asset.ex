@@ -15,7 +15,7 @@ defmodule StacApi.Data.ItemAsset do
     
     # File information
     field :file_size, :integer
-    field :created_at, :utc_datetime
+    field :created_at, :utc_datetime_usec
     
     # Raster-specific fields
     field :nodata_value, :decimal

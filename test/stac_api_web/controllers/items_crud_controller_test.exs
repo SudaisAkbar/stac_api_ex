@@ -27,6 +27,32 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
     {:ok, conn: auth_conn}
   end
 
+  describe "collection temporal extent" do
+    test "is unaffected by a non-UTC session TimeZone", %{conn: conn} do
+      # update_collection_extent/1 compares items.datetime against timestamptz
+      # values cast out of properties. While the columns were `timestamp without
+      # time zone`, Postgres resolved that mix using the session TimeZone, so
+      # this extent came out shifted by the session's offset (3h for Tallinn in
+      # June). Both sides are timestamptz now, making the result an instant
+      # comparison that no session setting can move.
+      Repo.query!("SET LOCAL TimeZone = 'Europe/Tallinn'", [])
+
+      post(conn, ~p"/stac/manage/v1/items", %{
+        "id" => "tz-sensitive-item",
+        "collection_id" => "test-collection",
+        "geometry" => %{"type" => "Point", "coordinates" => [0, 0]},
+        "datetime" => "2024-06-15T10:00:00Z",
+        "properties" => %{"datetime" => "2024-06-15T10:00:00Z"}
+      })
+
+      collection = Repo.get(StacApi.Data.Collection, "test-collection")
+      [[min_datetime, max_datetime]] = collection.extent["temporal"]["interval"]
+
+      assert min_datetime == "2024-06-15T10:00:00Z"
+      assert max_datetime == "2024-06-15T10:00:00Z"
+    end
+  end
+
   describe "POST /items - create item" do
     test "creates an item successfully", %{conn: conn} do
       params = %{
@@ -612,6 +638,17 @@ defmodule StacApiWeb.ItemsCrudControllerTest do
       assert {:ok, updated, 0} = DateTime.from_iso8601(patched["data"]["properties"]["updated"])
       assert {:ok, created, 0} = DateTime.from_iso8601(patched["data"]["properties"]["created"])
       assert DateTime.compare(updated, created) in [:gt, :eq]
+    end
+
+    test "microsecond precision survives the round trip", %{conn: conn} do
+      conn = get(conn, ~p"/stac/manage/v1/items/timestamped-item")
+      response = json_response(conn, 200)
+
+      {:ok, created, 0} = DateTime.from_iso8601(response["properties"]["created"])
+
+      # timestamptz(6) + :utc_datetime_usec — second precision would make two
+      # writes inside the same second indistinguishable for conflict detection.
+      assert {_value, 6} = created.microsecond
     end
 
     test "index exposes created/updated per feature", %{conn: conn} do

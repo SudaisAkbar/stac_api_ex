@@ -190,10 +190,12 @@ The import can be triggered:
 
 -  **Relationships**: Items reference collections via `collection_id`
 
--  **Timestamps**: Every schema `use`s `StacApi.Schema` rather than `Ecto.Schema`, which
-   fixes the timestamp type (`:utc_datetime`) in one place. This is what makes stored
-   timestamps render as RFC 3339 with an offset; a `NaiveDateTime` would silently render
-   without one and fail STAC conformance. See
+-  **Timestamps**: All timestamp columns are `timestamptz(6)`, and every schema `use`s
+   `StacApi.Schema` rather than `Ecto.Schema`, which fixes the Ecto type
+   (`:utc_datetime_usec`) in one place. This is what makes stored timestamps render as
+   RFC 3339 with an offset; a `NaiveDateTime` would silently render without one and fail
+   STAC conformance. Note Ecto's `:utc_datetime*` types map to Postgres `timestamp`, not
+   `timestamptz` — a migration has to say `timestamptz` explicitly. See
    [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#timestamps).
 
   
