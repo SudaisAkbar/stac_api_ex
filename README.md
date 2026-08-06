@@ -567,6 +567,20 @@ Responses here carry two fields beyond the STAC ones:
 See [PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#management-api-response-fields)
 for the caveats (server timestamps override client-supplied ones; `GET` omits nil fields).
 
+#### Datetimes must be RFC 3339 with a UTC offset
+
+Item temporal values are read from `properties` only — there is no top-level `datetime`
+field. Either `properties.datetime` is a valid RFC 3339 UTC string, or it is `null` and
+both `properties.start_datetime` and `properties.end_datetime` are given. Anything else
+is a `400`; nothing is silently coerced or dropped. Non-UTC offsets are accepted and
+normalized to `Z`.
+
+Temporal search matches by intersection with an item's footprint, so range items are
+findable and an instant matches a range containing it. Full rules, including the
+`datetime=<start>/<end>` and `..` query syntax and the `mix stac.backfill_temporal` task
+for pre-existing rows, are in
+[PROJECT_DOCUMENTATION.md](PROJECT_DOCUMENTATION.md#stac-datetime-handling).
+
 ### Browser Interface
 
 - `GET /stac/web/browse` - HTML directory browser

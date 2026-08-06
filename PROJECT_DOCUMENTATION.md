@@ -238,6 +238,93 @@ Two behaviours to be aware of when consuming these:
 `created` / `updated` are microsecond-precision, so `updated` can be compared before a
 `PATCH` to detect that a resource changed server-side since it was read.
 
+---
+
+## STAC Datetime Handling
+
+STAC follows RFC 3339 §5.6 and requires UTC. The API enforces this rather than coercing:
+a value it cannot read is a `400`, never a silently stored `NULL`.
+
+### Writing items
+
+An item's temporal information is read from `properties` only. **There is no top-level
+`datetime` field** — that shape predates STAC 1.0.0 and is not accepted.
+
+```jsonc
+// an instant
+"properties": { "datetime": "2024-05-01T18:27:48Z" }
+
+// a range — datetime MUST be null, and both bounds are then mandatory
+"properties": {
+  "datetime": null,
+  "start_datetime": "2024-05-01T18:27:00Z",
+  "end_datetime":   "2024-05-01T18:28:30Z"
+}
+```
+
+Rules enforced on `POST`, `PUT`, `PATCH` and bulk import:
+
+| Rule | Violation |
+|---|---|
+| Every value carries a UTC offset (`Z` or `+03:00`) | `400` — `properties.datetime must carry a UTC offset…` |
+| `datetime` non-null, **or** both `start_datetime` and `end_datetime` present | `400` |
+| `start_datetime` ≤ `end_datetime` | `400` |
+| Value is a parseable date-time (not a bare date) | `400` |
+
+Non-UTC offsets are accepted and **normalized**: `2024-05-01T21:27:48+03:00` is stored and
+returned as `2024-05-01T18:27:48Z`. Because normalization happens at write time, every
+endpoint renders the identical string, and the stored JSONB is always safe for SQL that
+casts it. Sub-second precision is preserved.
+
+`PATCH` replaces `properties` wholesale rather than merging, so a `PATCH` that supplies
+`properties` must include the temporal fields — otherwise it would silently erase them,
+and is rejected. A `PATCH` that does not supply `properties` at all leaves them untouched.
+
+The parsed values populate the `datetime` / `start_datetime` / `end_datetime` columns,
+which is what makes items findable by temporal search and what feeds collection extents.
+
+### Searching
+
+The `datetime` query parameter accepts an instant or an interval separated by `/`, with
+`..` (or empty) for an open end:
+
+```
+datetime=2024-05-01T18:27:48Z
+datetime=2024-01-01T00:00:00Z/2024-05-01T23:59:59Z
+datetime=../2024-05-01T23:59:59Z
+datetime=2024-01-01T00:00:00Z/..
+```
+
+Matching is by **intersection** with the item's temporal footprint — its `datetime` if it
+has one, otherwise its `[start_datetime, end_datetime]` span. An instant therefore matches
+a range item that contains it, and range items are reachable by temporal search at all.
+
+Query parsing is deliberately more permissive than write parsing: a naive value is read as
+UTC and a bare date as midnight UTC, which keeps the HTML browser's date picker
+(`<input type="datetime-local">`, which emits `YYYY-MM-DDTHH:MM`) working. A wrong guess
+costs one query's results rather than stored data. Genuinely unparseable input is still a
+`400`, so a bad parameter never silently widens the query to the whole catalogue.
+
+### Collection extents
+
+`extent.spatial` and `extent.temporal` are always recomputed from the collection's own
+items whenever an item is written; a client-supplied extent is not preserved. The temporal
+extent spans `LEAST(datetime, start_datetime)` to `GREATEST(datetime, end_datetime)` over
+the collection, using the typed columns. Open ends are emitted as JSON `null`, per the
+Collection spec:
+
+```json
+"temporal": { "interval": [["2015-06-23T00:00:00Z", null]] }
+```
+
+### Existing data
+
+`mix stac.backfill_temporal` populates the temporal columns for rows written before this
+was enforced and canonicalizes their `properties` strings. It parses leniently — rescuing
+data already stored rather than rejecting it — and reports how many values needed that
+leniency, since those would now be refused on write. Supports `--dry-run`, and is
+idempotent.
+
 ### 3. Web Interface Endpoints
 
 - `GET /stac/web/browse` - HTML directory browser
@@ -360,7 +447,9 @@ X-API-Key: your-api-key-here
 - stac_extensions (string array)
 - geometry (geography, PostGIS)
 - bbox (float array)
-- datetime (timestamptz(6), STAC observation time)
+- datetime (timestamptz(6), STAC observation instant; null for range items)
+- start_datetime (timestamptz(6), indexed; set when the item describes a range)
+- end_datetime (timestamptz(6), indexed; set when the item describes a range)
 - properties (jsonb)
 - assets (jsonb)
 - links (jsonb array)
@@ -940,8 +1029,8 @@ X-API-Key: dev-api-key-2024
     ]]
   },
   "bbox": [0, 0, 1, 1],
-  "datetime": "2024-01-01T00:00:00Z",
   "properties": {
+    "datetime": "2024-01-01T00:00:00Z",
     "eo:cloud_cover": 5.2
   },
   "assets": {
