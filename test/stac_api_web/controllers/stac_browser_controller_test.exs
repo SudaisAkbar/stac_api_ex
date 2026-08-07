@@ -60,6 +60,7 @@ defmodule StacApiWeb.StacBrowserControllerTest do
 
     auth_conn =
       conn
+      |> Plug.Test.init_test_session(%{})
       |> put_session(:browse_authenticated, true)
       |> get(~p"/stac/web/browse")
 
