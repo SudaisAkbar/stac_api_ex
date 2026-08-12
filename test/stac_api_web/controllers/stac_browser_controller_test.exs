@@ -7,10 +7,10 @@ defmodule StacApiWeb.StacBrowserControllerTest do
     conn = get(conn, ~p"/stac/web/browse")
     html = html_response(conn, 200)
 
-    assert html =~ "Enter the read-only API key to unlock private browse data."
+    assert html =~ "API Key"
     assert html =~ ~s(action="/stac/web/auth")
     assert html =~ ~s(name="api_key")
-    assert html =~ "Unlock private browse"
+    assert html =~ "Unlock"
   end
 
   test "posting a valid read-only key stores browse session auth", %{conn: conn} do

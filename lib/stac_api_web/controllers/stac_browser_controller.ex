@@ -441,15 +441,14 @@ defmodule StacApiWeb.StacBrowserController do
   defp parse_int(num) when is_integer(num), do: num
   defp parse_int(_), do: 0
 
-  # Session-based simple browse unlock: check POSTed read-only key
+  # Session-based simple browse unlock: check POSTed API key (read-write or read-only)
   def authenticate(conn, params) do
     api_key = Map.get(params, "api_key", "")
     return_to = Map.get(params, "return_to", "/stac/web/browse")
 
-    api_keys = Application.get_env(:stac_api, :api_keys, %{})
-    read_only = Map.get(api_keys, :read_only, []) || []
+    valid_keys = get_valid_browse_keys()
 
-    if api_key in read_only do
+    if api_key in valid_keys do
       conn
       |> put_session(:browse_authenticated, true)
       |> put_flash(:info, "Browse unlocked")
@@ -459,6 +458,13 @@ defmodule StacApiWeb.StacBrowserController do
       |> put_flash(:error, "Invalid API key")
       |> redirect(external: return_to)
     end
+  end
+
+  defp get_valid_browse_keys do
+    api_keys = Application.get_env(:stac_api, :api_keys, %{})
+    read_write = Map.get(api_keys, :read_write, []) || []
+    read_only = Map.get(api_keys, :read_only, []) || []
+    read_write ++ read_only
   end
 
   def logout(conn, _params) do
