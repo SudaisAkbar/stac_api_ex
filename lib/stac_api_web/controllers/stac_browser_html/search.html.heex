@@ -10,12 +10,13 @@
           </svg> STAC Item Search
         </h1>
       </div>
-      <div class="flex space-x-2">
-        <a href="/stac/web/browse" 
-           class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
-          ← Back to Browser
-        </a>
-      </div>
+<div class="flex items-center space-x-2">
+  <a href="/stac/web/browse" 
+     class="btn btn-md bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black text-md font-bold">
+    ← Back to Browser
+  </a>
+  <.auth_controls browse_authenticated={@browse_authenticated} current_path={"/stac/web/search"} />
+</div>
     </div>
   </div>
 

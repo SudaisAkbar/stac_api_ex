@@ -8,56 +8,67 @@ defmodule StacApiWeb.StacBrowserController do
   plug :assign_browse_authenticated
 
   def landing(conn, _params) do
-    render(conn, :landing)
+    conn
+    |> assign(:browse_authenticated, conn.assigns[:browse_authenticated] || false)
+    |> render(:landing)
   end
 
   def index(conn, _params) do
     authenticated = conn.assigns[:browse_authenticated] || false
 
-    catalogs_query = if authenticated do
-      from c in Catalog, where: c.depth == 0, order_by: [asc: c.id]
-    else
-      from c in Catalog, where: c.depth == 0 and (c.private == false or is_nil(c.private)), order_by: [asc: c.id]
-    end
+    catalogs_query =
+      if authenticated do
+        from(c in Catalog, where: c.depth == 0, order_by: [asc: c.id])
+      else
+        from(c in Catalog,
+          where: c.depth == 0 and (c.private == false or is_nil(c.private)),
+          order_by: [asc: c.id]
+        )
+      end
 
     catalogs = Repo.all(catalogs_query)
 
-    root_collections = Repo.all(
-      from c in Collection,
-      where: is_nil(c.catalog_id),
-      order_by: [asc: c.id]
-    )
-
-    items = catalogs
-    |> Enum.map(fn catalog ->
-      %{
-        id: catalog.id,
-        title: catalog.title || catalog.id,
-        description: catalog.description,
-        type: "Catalog",
-        path: "catalog/#{catalog.id}",
-        is_directory: true
-      }
-    end)
-
-    collection_items = root_collections
-    |> Enum.map(fn collection ->
-      item_count = Repo.aggregate(
-        from(i in Item, where: i.collection_id == ^collection.id),
-        :count,
-        :id
+    root_collections =
+      Repo.all(
+        from(c in Collection,
+          where: is_nil(c.catalog_id),
+          order_by: [asc: c.id]
+        )
       )
 
-      %{
-        id: collection.id,
-        title: collection.title || collection.id,
-        description: collection.description,
-        type: "Collection",
-        path: "collection/#{collection.id}",
-        is_directory: true,
-        item_count: item_count
-      }
-    end)
+    items =
+      catalogs
+      |> Enum.map(fn catalog ->
+        %{
+          id: catalog.id,
+          title: catalog.title || catalog.id,
+          description: catalog.description,
+          type: "Catalog",
+          path: "catalog/#{catalog.id}",
+          is_directory: true
+        }
+      end)
+
+    collection_items =
+      root_collections
+      |> Enum.map(fn collection ->
+        item_count =
+          Repo.aggregate(
+            from(i in Item, where: i.collection_id == ^collection.id),
+            :count,
+            :id
+          )
+
+        %{
+          id: collection.id,
+          title: collection.title || collection.id,
+          description: collection.description,
+          type: "Collection",
+          path: "collection/#{collection.id}",
+          is_directory: true,
+          item_count: item_count
+        }
+      end)
 
     all_items = items ++ collection_items
 
@@ -93,11 +104,11 @@ defmodule StacApiWeb.StacBrowserController do
         |> assign(:search_results, [])
         |> assign(:search_params, %{})
         |> assign(:total_count, 0)
+        |> assign(:browse_authenticated, conn.assigns[:browse_authenticated] || false)
         |> render(:search)
 
       _ ->
         authenticated = conn.assigns[:browse_authenticated] || false
-
         items = Search.search(search_params, authenticated)
         total_count = Search.count_search_results(search_params, authenticated)
 
@@ -105,6 +116,7 @@ defmodule StacApiWeb.StacBrowserController do
         |> assign(:search_results, items)
         |> assign(:search_params, search_params)
         |> assign(:total_count, total_count)
+        |> assign(:browse_authenticated, authenticated)
         |> render(:search)
     end
   end
@@ -177,71 +189,81 @@ defmodule StacApiWeb.StacBrowserController do
 
       catalog ->
         authenticated = conn.assigns[:browse_authenticated] || false
+
         if catalog.private == true && !authenticated do
           conn
           |> put_flash(:error, "Catalog not found")
           |> redirect(to: ~p"/stac/web/browse")
         else
-        child_catalogs = Repo.all(
-          from c in Catalog,
-          where: c.parent_catalog_id == ^catalog_id,
-          where: ^authenticated or (c.private == false or is_nil(c.private)),
-          order_by: [asc: c.id]
-        )
+          child_catalogs =
+            Repo.all(
+              from(c in Catalog,
+                where: c.parent_catalog_id == ^catalog_id,
+                where: ^authenticated or (c.private == false or is_nil(c.private)),
+                order_by: [asc: c.id]
+              )
+            )
 
-        collections_query = if authenticated do
-          from c in Collection, where: c.catalog_id == ^catalog_id, order_by: [asc: c.id]
-        else
-          from c in Collection,
-            left_join: cat in Catalog, on: c.catalog_id == cat.id,
-            where: c.catalog_id == ^catalog_id and (is_nil(cat.private) or cat.private != true),
-            order_by: [asc: c.id]
-        end
+          collections_query =
+            if authenticated do
+              from(c in Collection, where: c.catalog_id == ^catalog_id, order_by: [asc: c.id])
+            else
+              from(c in Collection,
+                left_join: cat in Catalog,
+                on: c.catalog_id == cat.id,
+                where:
+                  c.catalog_id == ^catalog_id and (is_nil(cat.private) or cat.private != true),
+                order_by: [asc: c.id]
+              )
+            end
 
-        collections = Repo.all(collections_query)
+          collections = Repo.all(collections_query)
 
-        catalog_items = child_catalogs
-        |> Enum.map(fn child_catalog ->
-          %{
-            id: child_catalog.id,
-            title: child_catalog.title || child_catalog.id,
-            description: child_catalog.description,
-            type: "Catalog",
-            path: "catalog/#{child_catalog.id}",
-            is_directory: true
-          }
-        end)
+          catalog_items =
+            child_catalogs
+            |> Enum.map(fn child_catalog ->
+              %{
+                id: child_catalog.id,
+                title: child_catalog.title || child_catalog.id,
+                description: child_catalog.description,
+                type: "Catalog",
+                path: "catalog/#{child_catalog.id}",
+                is_directory: true
+              }
+            end)
 
-        collection_items = collections
-        |> Enum.map(fn collection ->
-          item_count = Repo.aggregate(
-            from(i in Item, where: i.collection_id == ^collection.id),
-            :count,
-            :id
-          )
+          collection_items =
+            collections
+            |> Enum.map(fn collection ->
+              item_count =
+                Repo.aggregate(
+                  from(i in Item, where: i.collection_id == ^collection.id),
+                  :count,
+                  :id
+                )
 
-          %{
-            id: collection.id,
-            title: collection.title || collection.id,
-            description: collection.description,
-            type: "Collection",
-            path: "collection/#{collection.id}",
-            is_directory: true,
-            item_count: item_count
-          }
-        end)
+              %{
+                id: collection.id,
+                title: collection.title || collection.id,
+                description: collection.description,
+                type: "Collection",
+                path: "collection/#{collection.id}",
+                is_directory: true,
+                item_count: item_count
+              }
+            end)
 
-        all_items = catalog_items ++ collection_items
-        breadcrumbs = build_breadcrumbs_from_catalog(catalog)
+          all_items = catalog_items ++ collection_items
+          breadcrumbs = build_breadcrumbs_from_catalog(catalog)
 
-        conn
-        |> assign(:items, all_items)
-        |> assign(:current_path, path)
-        |> assign(:breadcrumbs, breadcrumbs)
-        |> assign(:collection_path, nil)
-        |> assign(:current_type, :catalog)
-        |> assign(:current_entity, catalog)
-        |> render(:index)
+          conn
+          |> assign(:items, all_items)
+          |> assign(:current_path, path)
+          |> assign(:breadcrumbs, breadcrumbs)
+          |> assign(:collection_path, nil)
+          |> assign(:current_type, :catalog)
+          |> assign(:current_entity, catalog)
+          |> render(:index)
         end
     end
   end
@@ -256,28 +278,33 @@ defmodule StacApiWeb.StacBrowserController do
       collection ->
         # Return early if the parent catalog is private and the session is not authenticated
         case ensure_collection_visible(conn, collection) do
-          {:halt, conn} -> conn
+          {:halt, conn} ->
+            conn
+
           {:ok, _conn} ->
-            items_query = from i in Item,
-              where: i.collection_id == ^collection_id,
-              order_by: [desc: i.datetime],
-              limit: 100
+            items_query =
+              from(i in Item,
+                where: i.collection_id == ^collection_id,
+                order_by: [desc: i.datetime],
+                limit: 100
+              )
 
             items = Repo.all(items_query)
 
-            item_entries = items
-            |> Enum.map(fn item ->
-              %{
-                id: item.id,
-                title: get_in(item.properties, ["title"]) || item.id,
-                description: get_in(item.properties, ["description"]),
-                type: "Item",
-                path: "#{path}/item/#{item.id}",
-                is_directory: false,
-                datetime: item.datetime,
-                properties: item.properties
-              }
-            end)
+            item_entries =
+              items
+              |> Enum.map(fn item ->
+                %{
+                  id: item.id,
+                  title: get_in(item.properties, ["title"]) || item.id,
+                  description: get_in(item.properties, ["description"]),
+                  type: "Item",
+                  path: "#{path}/item/#{item.id}",
+                  is_directory: false,
+                  datetime: item.datetime,
+                  properties: item.properties
+                }
+              end)
 
             breadcrumbs = build_breadcrumbs_from_collection(collection)
 
@@ -309,7 +336,9 @@ defmodule StacApiWeb.StacBrowserController do
           collection = Repo.get(Collection, collection_id)
 
           case ensure_collection_visible(conn, collection) do
-            {:halt, conn} -> conn
+            {:halt, conn} ->
+              conn
+
             {:ok, _conn} ->
               assets = reconstruct_item_assets(item.id, item.stac_extensions || [])
 
@@ -342,9 +371,12 @@ defmodule StacApiWeb.StacBrowserController do
 
   # Recursively walks up the catalog ancestor chain, building crumbs deepest-first.
   defp catalog_ancestor_crumbs(nil), do: []
+
   defp catalog_ancestor_crumbs(catalog_id) do
     case Repo.get(Catalog, catalog_id) do
-      nil -> []
+      nil ->
+        []
+
       catalog ->
         catalog_ancestor_crumbs(catalog.parent_catalog_id) ++
           [%{name: catalog.title || catalog.id, path: "catalog/#{catalog.id}"}]
@@ -368,11 +400,13 @@ defmodule StacApiWeb.StacBrowserController do
   defp build_breadcrumbs_from_item(item, collection) do
     collection_breadcrumbs = build_breadcrumbs_from_collection(collection)
     item_title = get_in(item.properties, ["title"]) || item.id
-    collection_breadcrumbs ++ [%{name: item_title, path: "collection/#{collection.id}/item/#{item.id}"}]
+
+    collection_breadcrumbs ++
+      [%{name: item_title, path: "collection/#{collection.id}/item/#{item.id}"}]
   end
 
   defp reconstruct_item_assets(item_id, stac_extensions) do
-    assets = Repo.all(from a in StacApi.Data.ItemAsset, where: a.item_id == ^item_id)
+    assets = Repo.all(from(a in StacApi.Data.ItemAsset, where: a.item_id == ^item_id))
 
     Enum.reduce(assets, %{}, fn asset, acc ->
       asset_data = StacApi.Data.ItemAsset.to_stac_asset(asset, stac_extensions)
@@ -385,7 +419,9 @@ defmodule StacApiWeb.StacBrowserController do
 
     if collection && collection.catalog_id do
       case Repo.get(Catalog, collection.catalog_id) do
-        nil -> {:ok, conn}
+        nil ->
+          {:ok, conn}
+
         catalog ->
           if catalog.private == true && !authenticated do
             conn = conn |> put_flash(:error, "Not found") |> redirect(to: ~p"/stac/web/browse")
@@ -438,27 +474,37 @@ defmodule StacApiWeb.StacBrowserController do
       :error -> 0
     end
   end
+
   defp parse_int(num) when is_integer(num), do: num
   defp parse_int(_), do: 0
 
   # Session-based simple browse unlock: check POSTed API key (read-write or read-only)
   def authenticate(conn, params) do
     api_key = Map.get(params, "api_key", "")
-    return_to = Map.get(params, "return_to", "/stac/web/browse")
-
+    return_to = safe_local_path(Map.get(params, "return_to", "/stac/web/browse"))
     valid_keys = get_valid_browse_keys()
 
     if api_key in valid_keys do
       conn
       |> put_session(:browse_authenticated, true)
       |> put_flash(:info, "Browse unlocked")
-      |> redirect(external: return_to)
+      |> redirect(to: return_to)
     else
       conn
       |> put_flash(:error, "Invalid API key")
-      |> redirect(external: return_to)
+      |> redirect(to: return_to)
     end
   end
+
+  defp safe_local_path("/" <> rest = path) do
+    if String.starts_with?(rest, "/") do
+      "/stac/web/browse"
+    else
+      path
+    end
+  end
+
+  defp safe_local_path(_), do: "/stac/web/browse"
 
   defp get_valid_browse_keys do
     api_keys = Application.get_env(:stac_api, :api_keys, %{})
@@ -467,11 +513,13 @@ defmodule StacApiWeb.StacBrowserController do
     read_write ++ read_only
   end
 
-  def logout(conn, _params) do
+  def logout(conn, params) do
+    return_to = safe_local_path(Map.get(params, "return_to", "/stac/web/browse"))
+
     conn
     |> delete_session(:browse_authenticated)
-    |> put_flash(:info, "Logged out")
-    |> redirect(to: ~p"/stac/web/browse")
+    |> put_flash(:info, "Private browsing locked")
+    |> redirect(to: return_to)
   end
 
   defp assign_browse_authenticated(conn, _opts) do

@@ -10,7 +10,9 @@
                 <a href="https://stacspec.org/" target="_blank" rel="noopener" class="link link-secondary">STAC specification</a>. 
                 Discover, browse, and access geospatial datasets with standardized metadata and intuitive interfaces.
             </p>
-            
+            <div class="flex justify-end mb-4">
+  <.auth_controls browse_authenticated={@browse_authenticated} current_path={"/stac/web/"} />
+</div>
             <div class="flex flex-wrap gap-4 justify-center">
                 <a href="/stac/web/browse" class="btn btn-lg bg-secondary hover:bg-secondary text-white hover:text-primary transition-transform duration-200 hover:scale-105 shadow-md shadow-black/50 border-black hover:border-black">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">

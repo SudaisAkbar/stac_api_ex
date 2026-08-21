@@ -10,7 +10,9 @@ defmodule StacApiWeb.StacBrowserHTML do
     geojson_data =
       if assigns[:geometry] && assigns[:properties] do
         geometry = convert_geography_to_geojson(assigns[:geometry])
-        geometry && %{"type" => "Feature", "geometry" => geometry, "properties" => assigns[:properties]}
+
+        geometry &&
+          %{"type" => "Feature", "geometry" => geometry, "properties" => assigns[:properties]}
       else
         extent = assigns[:geojson_data] || %{}
         convert_extent_to_geojson(extent)
@@ -62,21 +64,86 @@ defmodule StacApiWeb.StacBrowserHTML do
   # Convert extent JSON to GeoJSON feature
   defp convert_extent_to_geojson(%{"spatial" => %{"bbox" => [bbox_list | _]}} = _extent) do
     [min_lon, min_lat, max_lon, max_lat] = bbox_list
+
     %{
       "type" => "Feature",
       "geometry" => %{
         "type" => "Polygon",
-        "coordinates" => [[
-          [min_lon, min_lat],
-          [max_lon, min_lat],
-          [max_lon, max_lat],
-          [min_lon, max_lat],
-          [min_lon, min_lat]
-        ]]
+        "coordinates" => [
+          [
+            [min_lon, min_lat],
+            [max_lon, min_lat],
+            [max_lon, max_lat],
+            [min_lon, max_lat],
+            [min_lon, min_lat]
+          ]
+        ]
       }
     }
   end
 
   defp convert_extent_to_geojson(extent) when is_map(extent), do: extent
   defp convert_extent_to_geojson(_), do: %{}
+
+  def auth_controls(assigns) do
+    ~H"""
+    <div class="inline-flex items-center space-x-2">
+      <%= if @browse_authenticated do %>
+        <div class="flex items-center space-x-2">
+          <span class="px-2 py-0.5 text-xs font-medium rounded text-primary bg-secondary border border-black">Private: ON</span>
+          <form action="/stac/web/logout" method="post" class="inline">
+    <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+    
+    <input
+      type="hidden"
+      name="return_to"
+      value={@current_path}
+    />
+    
+    <button
+      type="submit"
+      class="btn btn-sm bg-secondary text-primary border-black shadow-sm shadow-black/20"
+      title="Logout private browsing"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2-2V7a2 2 0 012-2h5a2 2 0 012 2v1" />
+      </svg>
+      Logout
+    </button>
+    </form>
+        </div>
+      <% else %>
+        <div class="dropdown dropdown-end">
+          <label tabindex="0" class="btn btn-sm bg-secondary text-primary border-black flex items-center justify-center" title="Unlock private browsing">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </label>
+          <form tabindex="0" action="/stac/web/auth" method="post" class="dropdown-content menu p-3 shadow bg-white rounded-box w-56 border border-secondary">
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
+            <input type="hidden" name="return_to" value={@current_path} />
+            <div class="form-control">
+              <label class="label p-0 mb-1"><span class="label-text text-xs text-secondary">API Key</span></label>
+              <input
+                name="api_key"
+                type="password"
+                placeholder="Enter API key"
+                class="input input-sm w-full border-secondary focus:border-primary"
+                autocomplete="current-password"
+              />
+            </div>
+            <div class="mt-3 text-right">
+              <button
+                type="submit"
+                class="btn btn-sm bg-secondary text-primary border-black shadow-sm shadow-black/20"
+              >
+                Unlock
+              </button>
+            </div>
+          </form>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
 end
