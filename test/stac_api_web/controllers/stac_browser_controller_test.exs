@@ -14,11 +14,7 @@ defmodule StacApiWeb.StacBrowserControllerTest do
   end
 
   test "posting a valid read-only key stores browse session auth", %{conn: conn} do
-    read_only_key =
-      :stac_api
-      |> Application.get_env(:api_keys, %{})
-      |> Map.get(:read_only, [])
-      |> List.first()
+    read_only_key = configured_read_only_key()
 
     assert is_binary(read_only_key)
 
@@ -48,7 +44,7 @@ defmodule StacApiWeb.StacBrowserControllerTest do
       conn
       |> Plug.Test.init_test_session(%{})
       |> post("/stac/web/auth", %{
-        "api_key" => "test-read-only-key-2024",
+        "api_key" => configured_read_only_key(),
         "return_to" => "https://evil.example"
       })
 
@@ -60,7 +56,7 @@ defmodule StacApiWeb.StacBrowserControllerTest do
       conn
       |> Plug.Test.init_test_session(%{})
       |> post("/stac/web/auth", %{
-        "api_key" => "test-read-only-key-2024",
+        "api_key" => configured_read_only_key(),
         "return_to" => "//evil.example"
       })
 
@@ -72,7 +68,7 @@ defmodule StacApiWeb.StacBrowserControllerTest do
       conn
       |> Plug.Test.init_test_session(%{})
       |> post("/stac/web/auth", %{
-        "api_key" => "test-read-only-key-2024",
+        "api_key" => configured_read_only_key(),
         "return_to" => "/\\evil.example"
       })
 
@@ -102,5 +98,12 @@ defmodule StacApiWeb.StacBrowserControllerTest do
 
     auth_html = html_response(auth_conn, 200)
     assert auth_html =~ catalog.title
+  end
+
+  defp configured_read_only_key do
+    :stac_api
+    |> Application.get_env(:api_keys, %{})
+    |> Map.get(:read_only, [])
+    |> List.first()
   end
 end

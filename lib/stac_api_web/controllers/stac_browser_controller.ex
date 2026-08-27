@@ -475,7 +475,11 @@ defmodule StacApiWeb.StacBrowserController do
   defp parse_int(num) when is_integer(num), do: num
   defp parse_int(_), do: 0
 
-  # Session-based simple browse unlock: check POSTed API key (read-write or read-only)
+  @doc """
+  Authenticates a browser session using a configured API key.
+
+  Successful and failed attempts redirect only to an approved local STAC web path.
+  """
   def authenticate(conn, params) do
     api_key = Map.get(params, "api_key", "")
     return_to = safe_local_path(Map.get(params, "return_to", "/stac/web/browse"))
@@ -493,6 +497,7 @@ defmodule StacApiWeb.StacBrowserController do
     end
   end
 
+  # Prevent open redirects by allowing only local STAC browser paths.
   defp safe_local_path(path) when is_binary(path) do
     if Regex.match?(~r{\A/stac/web(/|\z)}, path) do
       path
@@ -510,6 +515,9 @@ defmodule StacApiWeb.StacBrowserController do
     read_write ++ read_only
   end
 
+  @doc """
+  Ends the private browsing session and returns the user to the browser root.
+  """
   def logout(conn, _params) do
     conn
     |> delete_session(:browse_authenticated)
