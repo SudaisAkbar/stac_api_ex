@@ -85,6 +85,9 @@ defmodule StacApiWeb.StacBrowserHTML do
   defp convert_extent_to_geojson(extent) when is_map(extent), do: extent
   defp convert_extent_to_geojson(_), do: %{}
 
+  attr :browse_authenticated, :boolean, required: true
+  attr :current_path, :string, required: true
+
   def auth_controls(assigns) do
     ~H"""
     <div class="inline-flex items-center space-x-2">
@@ -106,7 +109,7 @@ defmodule StacApiWeb.StacBrowserHTML do
       title="Logout private browsing"
     >
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2-2V7a2 2 0 012-2h5a2 2 0 012 2v1" />
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h5a2 2 0 012 2v1" />
       </svg>
       Logout
     </button>

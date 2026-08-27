@@ -9,7 +9,6 @@ defmodule StacApiWeb.StacBrowserController do
 
   def landing(conn, _params) do
     conn
-    |> assign(:browse_authenticated, conn.assigns[:browse_authenticated] || false)
     |> render(:landing)
   end
 
@@ -104,7 +103,6 @@ defmodule StacApiWeb.StacBrowserController do
         |> assign(:search_results, [])
         |> assign(:search_params, %{})
         |> assign(:total_count, 0)
-        |> assign(:browse_authenticated, conn.assigns[:browse_authenticated] || false)
         |> render(:search)
 
       _ ->
@@ -116,7 +114,6 @@ defmodule StacApiWeb.StacBrowserController do
         |> assign(:search_results, items)
         |> assign(:search_params, search_params)
         |> assign(:total_count, total_count)
-        |> assign(:browse_authenticated, authenticated)
         |> render(:search)
     end
   end
@@ -496,11 +493,11 @@ defmodule StacApiWeb.StacBrowserController do
     end
   end
 
-  defp safe_local_path("/" <> rest = path) do
-    if String.starts_with?(rest, "/") do
-      "/stac/web/browse"
-    else
+  defp safe_local_path(path) when is_binary(path) do
+    if Regex.match?(~r{\A/stac/web(/|\z)}, path) do
       path
+    else
+      "/stac/web/browse"
     end
   end
 
@@ -513,13 +510,11 @@ defmodule StacApiWeb.StacBrowserController do
     read_write ++ read_only
   end
 
-  def logout(conn, params) do
-    return_to = safe_local_path(Map.get(params, "return_to", "/stac/web/browse"))
-
+  def logout(conn, _params) do
     conn
     |> delete_session(:browse_authenticated)
     |> put_flash(:info, "Private browsing locked")
-    |> redirect(to: return_to)
+    |> redirect(to: "/stac/web/browse")
   end
 
   defp assign_browse_authenticated(conn, _opts) do

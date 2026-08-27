@@ -43,6 +43,42 @@ defmodule StacApiWeb.StacBrowserControllerTest do
     assert get_session(conn, :browse_authenticated) != true
   end
 
+  test "absolute URL in return_to is rejected and redirects to browse", %{conn: conn} do
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> post("/stac/web/auth", %{
+        "api_key" => "test-read-only-key-2024",
+        "return_to" => "https://evil.example"
+      })
+
+    assert redirected_to(conn) == "/stac/web/browse"
+  end
+
+  test "protocol-relative URL in return_to is rejected", %{conn: conn} do
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> post("/stac/web/auth", %{
+        "api_key" => "test-read-only-key-2024",
+        "return_to" => "//evil.example"
+      })
+
+    assert redirected_to(conn) == "/stac/web/browse"
+  end
+
+  test "backslash host bypass in return_to is rejected", %{conn: conn} do
+    conn =
+      conn
+      |> Plug.Test.init_test_session(%{})
+      |> post("/stac/web/auth", %{
+        "api_key" => "test-read-only-key-2024",
+        "return_to" => "/\\evil.example"
+      })
+
+    assert redirected_to(conn) == "/stac/web/browse"
+  end
+
   test "private catalog is hidden from unauthenticated browse and visible after unlock", %{conn: conn} do
     catalog =
       %Catalog{}
