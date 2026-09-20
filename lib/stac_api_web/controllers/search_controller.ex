@@ -1,6 +1,6 @@
 defmodule StacApiWeb.SearchController do
   use StacApiWeb, :controller
-  alias StacApi.Data.Search
+  alias StacApi.Data.{ItemFilters, Search}
   alias StacApiWeb.LinkResolver
   alias StacApi.Data.Item
 
@@ -20,35 +20,23 @@ defmodule StacApiWeb.SearchController do
 
   authenticated = conn.assigns[:authenticated] || false
 
-  case validate_datetime_param(search_params) do
-    :ok -> run_search(conn, search_params, authenticated)
-    {:error, reason} ->
+  case ItemFilters.parse(search_params) do
+    {:ok, filters} -> run_search(conn, search_params, authenticated, filters)
+    {:error, parameter, reason} ->
       conn
       |> put_status(:bad_request)
-      |> json(%{"error" => "Invalid datetime parameter: it #{reason}"})
+      |> json(%{"error" => "Invalid #{parameter} parameter: #{reason}"})
   end
   end
 
-  # A datetime the server cannot parse must not be silently dropped — that would
-  # answer a narrow query with the whole catalogue.
-  defp validate_datetime_param(params) do
-    case params[:datetime] || params["datetime"] do
-      nil -> :ok
-      "" -> :ok
-      value ->
-        case StacApi.Temporal.parse_datetime_param(value) do
-          {:ok, _parsed} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
-    end
-  end
-
-  defp run_search(conn, search_params, authenticated) do
+  # Both API paths pass the same parsed filters to Search, preventing silent
+  # fallbacks to an unfiltered result set.
+  defp run_search(conn, search_params, authenticated, filters) do
   items =
-    Search.search(search_params, authenticated)
+    Search.search(search_params, authenticated, filters)
     |> Enum.map(&ensure_item_struct/1)
 
-  total_count = Search.count_search_results(search_params, authenticated)
+  total_count = Search.count_search_results(search_params, authenticated, filters)
 
   features = Enum.map(items, fn item ->
     serialized = Search.serialize_item_for_api(item)

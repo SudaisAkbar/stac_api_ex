@@ -1,6 +1,6 @@
 defmodule StacApiWeb.CollectionsController do
   use StacApiWeb, :controller
-  alias StacApi.Data.{Collection, ItemAsset, Catalog}
+  alias StacApi.Data.{Catalog, Collection, ItemAsset, ItemFilters}
   alias StacApi.Repo
   alias StacApiWeb.LinkResolver
   import Ecto.Query
@@ -105,7 +105,14 @@ defmodule StacApiWeb.CollectionsController do
       limit = parse_int(params["limit"] || "10") |> max(1) |> min(10_000)
       offset = parse_int(params["offset"] || "0") |> max(0)
 
-      case Repo.get(Collection, collection_id) do
+      case ItemFilters.parse(params) do
+        {:error, parameter, reason} ->
+          conn
+          |> put_status(:bad_request)
+          |> json(%{error: "Invalid #{parameter} parameter: #{reason}"})
+
+        {:ok, filters} ->
+          case Repo.get(Collection, collection_id) do
         nil ->
           conn
           |> put_status(:not_found)
@@ -133,9 +140,12 @@ defmodule StacApiWeb.CollectionsController do
             |> put_status(:not_found)
             |> json(%{error: "Collection not found"})
           else
-            base_query = from i in StacApi.Data.Item,
-              where: i.collection_id == ^collection_id,
-              order_by: [desc: i.datetime]
+            base_query =
+              from(i in StacApi.Data.Item,
+                where: i.collection_id == ^collection_id,
+                order_by: [desc: i.datetime]
+              )
+              |> ItemFilters.apply(filters)
 
             total_count = Repo.aggregate(base_query, :count, :id)
 
@@ -156,16 +166,16 @@ defmodule StacApiWeb.CollectionsController do
 
             pagination_links =
               [
-                %{"rel" => "self", "href" => "#{items_base}?limit=#{limit}&offset=#{offset}", "type" => "application/geo+json"},
+                %{"rel" => "self", "href" => collection_items_page_url(items_base, params, limit, offset), "type" => "application/geo+json"},
                 %{"rel" => "root", "href" => "#{base_url}/stac/api/v1/", "type" => "application/json"},
                 %{"rel" => "collection", "href" => "#{base_url}/stac/api/v1/collections/#{collection_id}", "type" => "application/json"}
               ] ++
               (if offset + limit < total_count do
-                [%{"rel" => "next", "href" => "#{items_base}?limit=#{limit}&offset=#{offset + limit}", "type" => "application/geo+json"}]
+                [%{"rel" => "next", "href" => collection_items_page_url(items_base, params, limit, offset + limit), "type" => "application/geo+json"}]
               else [] end) ++
               (if offset > 0 do
                 prev_offset = max(offset - limit, 0)
-                [%{"rel" => "prev", "href" => "#{items_base}?limit=#{limit}&offset=#{prev_offset}", "type" => "application/geo+json"}]
+                [%{"rel" => "prev", "href" => collection_items_page_url(items_base, params, limit, prev_offset), "type" => "application/geo+json"}]
               else [] end)
 
             conn
@@ -180,6 +190,7 @@ defmodule StacApiWeb.CollectionsController do
                 limit: limit
               }
             })
+          end
           end
       end
     rescue
@@ -277,6 +288,18 @@ defmodule StacApiWeb.CollectionsController do
   end
   defp parse_int(num) when is_integer(num), do: num
   defp parse_int(_), do: 0
+
+  defp collection_items_page_url(items_base, params, limit, offset) do
+    query_params =
+      [{"limit", limit}, {"offset", offset}]
+      |> maybe_add_filter("datetime", params["datetime"])
+      |> maybe_add_filter("bbox", params["bbox"])
+
+    "#{items_base}?#{URI.encode_query(query_params)}"
+  end
+
+  defp maybe_add_filter(query_params, _name, value) when value in [nil, ""], do: query_params
+  defp maybe_add_filter(query_params, name, value), do: query_params ++ [{name, value}]
 
   defp maybe_put_collection_field(map, _key, nil), do: map
   defp maybe_put_collection_field(map, _key, []), do: map

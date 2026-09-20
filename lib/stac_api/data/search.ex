@@ -5,13 +5,19 @@ defmodule StacApi.Data.Search do
 
   import Ecto.Query
   alias StacApi.Repo
-  alias StacApi.Temporal
-  alias StacApi.Data.{Item, Collection, ItemAsset, Catalog}
+  alias StacApi.Data.{Item, Collection, ItemAsset, Catalog, ItemFilters}
 
   def search(params \\ %{}, authenticated \\ false) do
+    case ItemFilters.parse(params) do
+      {:ok, filters} -> search(params, authenticated, filters)
+      {:error, _, _} -> []
+    end
+  end
+
+  def search(params, authenticated, filters) do
   query =
     Item
-    |> build_search_query(params, authenticated)
+    |> build_search_query(params, authenticated, filters)
     |> apply_pagination(params)
 
   # First get the raw results with geometry as GeoJSON
@@ -89,17 +95,23 @@ defp convert_geojson_geometry(item), do: item
 
 
   def count_search_results(params \\ %{}, authenticated \\ false) do
+    case ItemFilters.parse(params) do
+      {:ok, filters} -> count_search_results(params, authenticated, filters)
+      {:error, _, _} -> 0
+    end
+  end
+
+  def count_search_results(params, authenticated, filters) do
     Item
-    |> build_search_query(params, authenticated)
+    |> build_search_query(params, authenticated, filters)
     |> Repo.aggregate(:count, :id)
   end
 
-  defp build_search_query(query, params, authenticated) do
+  defp build_search_query(query, params, authenticated, filters) do
     query
     |> filter_by_private_catalogs(authenticated)
     |> filter_by_collections(params[:collections] || params["collections"])
-    |> filter_by_bbox(params[:bbox] || params["bbox"])
-    |> filter_by_datetime(params[:datetime] || params["datetime"])
+    |> ItemFilters.apply(filters)
     |> filter_by_ids(params[:ids] || params["ids"])
     |> filter_by_intersects(params[:intersects] || params["intersects"])
     |> order_by([i], desc: i.datetime)
@@ -120,75 +132,6 @@ defp convert_geojson_geometry(item), do: item
   end
   defp filter_by_collections(query, collections) when is_list(collections) do
     from i in query, where: i.collection_id in ^collections
-  end
-
-  defp filter_by_bbox(query, nil), do: query
-  defp filter_by_bbox(query, bbox) when is_binary(bbox) do
-    case String.split(bbox, ",") |> Enum.map(&parse_float/1) do
-      [minx, miny, maxx, maxy] when is_number(minx) and is_number(miny) and
-                                   is_number(maxx) and is_number(maxy) ->
-        filter_by_bbox_coords(query, minx, miny, maxx, maxy)
-      _ -> query
-    end
-  end
-  defp filter_by_bbox(query, [minx, miny, maxx, maxy]) when is_number(minx) do
-    filter_by_bbox_coords(query, minx, miny, maxx, maxy)
-  end
-  defp filter_by_bbox(query, _), do: query
-
-  defp filter_by_bbox_coords(query, minx, miny, maxx, maxy) do
-    # Create a bounding box polygon in WKT format
-    bbox_wkt = "POLYGON((#{minx} #{miny}, #{maxx} #{miny}, #{maxx} #{maxy}, #{minx} #{maxy}, #{minx} #{miny}))"
-
-    from i in query,
-      where: fragment("ST_Intersects(?, ST_GeomFromText(?, 4326)::geography)", i.geometry, ^bbox_wkt)
-  end
-
-  # An item's temporal footprint is either an instant (`datetime`) or a range
-  # (`start_datetime`/`end_datetime`, used when `datetime` is null). Matching only
-  # `datetime` made every range-only item invisible to temporal search, so both
-  # forms are collapsed into a [lo, hi] window and intersected with the query.
-  defp filter_by_datetime(query, nil), do: query
-
-  defp filter_by_datetime(query, datetime) when is_binary(datetime) do
-    case Temporal.parse_datetime_param(datetime) do
-      {:ok, {:instant, instant}} ->
-        from i in query,
-          where:
-            fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^instant and
-              fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^instant
-
-      {:ok, {:interval, start_dt, end_dt}} ->
-        filter_by_datetime_range(query, start_dt, end_dt)
-
-      # Unparseable values are rejected with a 400 by the controller; this clause
-      # only guards other callers (the HTML browser) from a crash.
-      {:error, _reason} ->
-        query
-    end
-  end
-
-  defp filter_by_datetime(query, _), do: query
-
-  defp filter_by_datetime_range(query, start_dt, end_dt) do
-    cond do
-      start_dt && end_dt ->
-        from i in query,
-          where:
-            fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^end_dt and
-              fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^start_dt
-
-      start_dt ->
-        from i in query,
-          where: fragment("COALESCE(?, ?)", i.end_datetime, i.datetime) >= ^start_dt
-
-      end_dt ->
-        from i in query,
-          where: fragment("COALESCE(?, ?)", i.start_datetime, i.datetime) <= ^end_dt
-
-      true ->
-        query
-    end
   end
 
   defp filter_by_ids(query, nil), do: query
@@ -231,16 +174,6 @@ defp convert_geojson_geometry(item), do: item
   defp preload_collections(items) do
     Repo.preload(items, :collection)
   end
-
-  # Helper functions
-  defp parse_float(str) when is_binary(str) do
-    case Float.parse(str) do
-      {num, _} -> num
-      :error -> nil
-    end
-  end
-  defp parse_float(num) when is_number(num), do: num
-  defp parse_float(_), do: nil
 
   defp parse_int(str) when is_binary(str) do
     case Integer.parse(str) do

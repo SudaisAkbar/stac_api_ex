@@ -27,6 +27,12 @@ defmodule StacApiWeb.CollectionsControllerTest do
     {:ok, conn: auth_conn}
   end
 
+  defp feature_ids(response) do
+    response["features"]
+    |> Enum.map(& &1["id"])
+    |> Enum.sort()
+  end
+
   describe "GET /collections - list all collections" do
     test "returns all collections", %{conn: conn} do
       conn = get(conn, ~p"/stac/api/v1/collections")
@@ -153,6 +159,139 @@ defmodule StacApiWeb.CollectionsControllerTest do
       conn = get(conn, ~p"/stac/api/v1/collections/non-existent/items")
       assert response = json_response(conn, 404)
       assert response["error"] =~ "not found"
+    end
+  end
+
+  describe "GET /collections/:id/items - datetime and bbox filters" do
+    setup %{conn: conn} do
+      post(conn, ~p"/stac/manage/v1/collections", %{
+        "id" => "collection-filter-test",
+        "title" => "Collection Filter Test",
+        "description" => "Shared fixtures for Search and Features filters",
+        "license" => "CC-BY-4.0"
+      })
+
+      items = [
+        %{
+          "id" => "filter-old",
+          "collection_id" => "collection-filter-test",
+          "geometry" => %{"type" => "Point", "coordinates" => [21.5, 57.5]},
+          "bbox" => [21.5, 57.5, 21.5, 57.5],
+          "properties" => %{"datetime" => "2015-05-05T00:00:00Z"}
+        },
+        %{
+          "id" => "filter-range",
+          "collection_id" => "collection-filter-test",
+          "geometry" => %{"type" => "Point", "coordinates" => [24.5, 58.5]},
+          "bbox" => [24.5, 58.5, 24.5, 58.5],
+          "properties" => %{
+            "datetime" => nil,
+            "start_datetime" => "2018-04-01T00:00:00Z",
+            "end_datetime" => "2019-05-31T23:59:59Z"
+          }
+        },
+        %{
+          "id" => "filter-new",
+          "collection_id" => "collection-filter-test",
+          "geometry" => %{"type" => "Point", "coordinates" => [27.5, 59.5]},
+          "bbox" => [27.5, 59.5, 27.5, 59.5],
+          "properties" => %{"datetime" => "2024-05-05T00:00:00Z"}
+        }
+      ]
+
+      Enum.each(items, &post(conn, ~p"/stac/manage/v1/items", &1))
+
+      :ok
+    end
+
+    test "matches Search for closed, open, and instant datetime filters", %{conn: conn} do
+      datetime_cases = [
+        {"2018-06-01T00:00:00Z/2018-06-30T23:59:59Z", ["filter-range"]},
+        {"../2016-12-31T23:59:59Z", ["filter-old"]},
+        {"2020-01-01T00:00:00Z/..", ["filter-new"]},
+        {"2024-05-05T00:00:00Z", ["filter-new"]}
+      ]
+
+      Enum.each(datetime_cases, fn {datetime, expected_ids} ->
+        collection_response =
+          conn
+          |> get(~p"/stac/api/v1/collections/collection-filter-test/items", %{"datetime" => datetime})
+          |> json_response(200)
+
+        search_response =
+          build_conn()
+          |> get(~p"/stac/api/v1/search", %{
+            "collections" => "collection-filter-test",
+            "datetime" => datetime
+          })
+          |> json_response(200)
+
+        assert feature_ids(collection_response) == expected_ids
+        assert feature_ids(collection_response) == feature_ids(search_response)
+        assert collection_response["context"]["matched"] == length(expected_ids)
+      end)
+    end
+
+    test "matches Search for intersecting and disjoint bounding boxes", %{conn: conn} do
+      Enum.each([{"21,57,22,58", ["filter-old"]}, {"0,0,1,1", []}], fn {bbox, expected_ids} ->
+        collection_response =
+          conn
+          |> get(~p"/stac/api/v1/collections/collection-filter-test/items", %{"bbox" => bbox})
+          |> json_response(200)
+
+        search_response =
+          build_conn()
+          |> get(~p"/stac/api/v1/search", %{
+            "collections" => "collection-filter-test",
+            "bbox" => bbox
+          })
+          |> json_response(200)
+
+        assert feature_ids(collection_response) == expected_ids
+        assert feature_ids(collection_response) == feature_ids(search_response)
+      end)
+    end
+
+    test "returns 400 from both endpoints for malformed datetime and bbox filters", %{conn: conn} do
+      Enum.each([{"datetime", "not-a-date"}, {"bbox", "21,57,not-a-number,59"}], fn {parameter, value} ->
+        collection_response =
+          conn
+          |> get(~p"/stac/api/v1/collections/collection-filter-test/items", %{parameter => value})
+          |> json_response(400)
+
+        search_response =
+          build_conn()
+          |> get(~p"/stac/api/v1/search", %{
+            "collections" => "collection-filter-test",
+            parameter => value
+          })
+          |> json_response(400)
+
+        assert collection_response["error"] =~ parameter
+        assert search_response["error"] =~ parameter
+      end)
+    end
+
+    test "keeps active filters in collection item pagination links", %{conn: conn} do
+      datetime = "2014-01-01T00:00:00Z/2025-01-01T00:00:00Z"
+      bbox = "20,56,29,61"
+
+      response =
+        conn
+        |> get(~p"/stac/api/v1/collections/collection-filter-test/items", %{
+          "datetime" => datetime,
+          "bbox" => bbox,
+          "limit" => "1"
+        })
+        |> json_response(200)
+
+      next_link = Enum.find(response["links"], &(&1["rel"] == "next"))
+      query = next_link["href"] |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
+
+      assert query["datetime"] == datetime
+      assert query["bbox"] == bbox
+      assert query["limit"] == "1"
+      assert query["offset"] == "1"
     end
   end
 
