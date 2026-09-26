@@ -312,13 +312,35 @@ defmodule StacApiWeb.ApiDocs do
         auth: :optional,
         params: [
           path_param("collection_id", "Collection identifier", "estonia-soil"),
+<<<<<<< HEAD
+=======
+          query(
+            "bbox",
+            "string",
+            "Bounding box west,south,east,north in WGS 84 (4 numbers, or 6 with elevation).",
+            example: "21.6,57.4,28.3,59.9"
+          ),
+          query(
+            "datetime",
+            "string",
+            "RFC 3339 instant or interval start/end. Either end may be open with '..'. Items whose datetime, or start/end range, overlaps the interval match.",
+            example: "2020-01-01T00:00:00Z/2021-12-31T23:59:59Z"
+          ),
+>>>>>>> 3ba1ed8 (fix(api): polish datetime bbox filters per review feedback)
           limit_param(10, 10_000),
           offset_param()
         ],
         request_body: nil,
+<<<<<<< HEAD
         example_query: "limit=2",
         responses: [
           ok(@geojson, "Item collection", "ItemCollection"),
+=======
+        example_query: "datetime=2020-01-01T00:00:00Z/2021-12-31T23:59:59Z&limit=2",
+        responses: [
+          ok(@geojson, "Item collection", "ItemCollection"),
+          err(400, "Invalid datetime or bbox parameter"),
+>>>>>>> 3ba1ed8 (fix(api): polish datetime bbox filters per review feedback)
           err(404, "Collection not found")
         ]
       },
@@ -351,7 +373,11 @@ defmodule StacApiWeb.ApiDocs do
           "collections=estonia-sentinel2-ndvi&datetime=2020-04-01T00:00:00Z/2020-10-31T23:59:59Z&limit=5",
         responses: [
           ok(@geojson, "Matching items", "ItemCollection"),
+<<<<<<< HEAD
           err(400, "Invalid datetime parameter")
+=======
+          err(400, "Invalid datetime or bbox parameter")
+>>>>>>> 3ba1ed8 (fix(api): polish datetime bbox filters per review feedback)
         ]
       },
       %{
@@ -367,7 +393,11 @@ defmodule StacApiWeb.ApiDocs do
         request_body: search_body(),
         responses: [
           ok(@geojson, "Matching items", "ItemCollection"),
+<<<<<<< HEAD
           err(400, "Invalid datetime parameter")
+=======
+          err(400, "Invalid datetime or bbox parameter")
+>>>>>>> 3ba1ed8 (fix(api): polish datetime bbox filters per review feedback)
         ]
       },
       %{

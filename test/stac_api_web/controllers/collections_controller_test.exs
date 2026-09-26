@@ -196,6 +196,13 @@ defmodule StacApiWeb.CollectionsControllerTest do
           "geometry" => %{"type" => "Point", "coordinates" => [27.5, 59.5]},
           "bbox" => [27.5, 59.5, 27.5, 59.5],
           "properties" => %{"datetime" => "2024-05-05T00:00:00Z"}
+        },
+        %{
+          "id" => "filter-date-line",
+          "collection_id" => "collection-filter-test",
+          "geometry" => %{"type" => "Point", "coordinates" => [179.5, 58.5]},
+          "bbox" => [179.5, 58.5, 179.5, 58.5],
+          "properties" => %{"datetime" => "2017-05-05T00:00:00Z"}
         }
       ]
 
@@ -250,6 +257,17 @@ defmodule StacApiWeb.CollectionsControllerTest do
         assert feature_ids(collection_response) == expected_ids
         assert feature_ids(collection_response) == feature_ids(search_response)
       end)
+    end
+
+    test "matches items in a bbox crossing the date line", %{conn: conn} do
+      response =
+        conn
+        |> get(~p"/stac/api/v1/collections/collection-filter-test/items", %{
+          "bbox" => "179,58,-179,59"
+        })
+        |> json_response(200)
+
+      assert feature_ids(response) == ["filter-date-line"]
     end
 
     test "returns 400 from both endpoints for malformed datetime and bbox filters", %{conn: conn} do

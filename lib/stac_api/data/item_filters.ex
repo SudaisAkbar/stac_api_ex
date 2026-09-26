@@ -88,11 +88,11 @@ defmodule StacApi.Data.ItemFilters do
   defp validate_bbox(west, south, east, north)
        when west >= -180 and west <= 180 and east >= -180 and east <= 180 and
               south >= -90 and south <= 90 and north >= -90 and north <= 90 and
-              west <= east and south <= north,
+              south <= north,
        do: :ok
 
   defp validate_bbox(_, _, _, _),
-    do: {:error, :bbox, "must be an ordered WGS84 bounding box"}
+    do: {:error, :bbox, "coordinates must be within WGS84 bounds"}
 
   defp filter_by_datetime(query, nil), do: query
 
